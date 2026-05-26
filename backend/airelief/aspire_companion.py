@@ -47,8 +47,15 @@ def write_steps(
     )
     lines.append("")
 
+    section_n = 0
+
+    def section(title: str) -> str:
+        nonlocal section_n
+        section_n += 1
+        return f"## {section_n}. {title}"
+
     if has_sunburst:
-        lines.append("## 1. Radiating sunburst background")
+        lines.append(section("Radiating sunburst background"))
         lines.append("")
         lines.append("- Aspire → **Modeling** tab → import a radial/sunburst texture")
         lines.append("  (or model one with the polar-array tool).")
@@ -58,7 +65,7 @@ def write_steps(
         lines.append("")
 
     if has_frame:
-        lines.append("## 2. Wooden frame")
+        lines.append(section("Wooden frame"))
         lines.append("")
         lines.append("- Aspire → **Drawing** → rectangle, inset ~10–15 mm from the board edge.")
         lines.append("- Pocket toolpath inside the rectangle to 3–5 mm depth.")
@@ -66,7 +73,7 @@ def write_steps(
         lines.append("")
 
     if has_text:
-        lines.append("## 3. Lettering")
+        lines.append(section("Lettering"))
         lines.append("")
         if text:
             lines.append(f"- Text to engrave: **{text}**")
@@ -75,19 +82,23 @@ def write_steps(
         lines.append("- **V-carve** toolpath, 60° v-bit, 1–2 mm depth.")
         lines.append("")
 
-    lines.append("## 4. Toolpath order")
+    lines.append(section("Toolpath order"))
     lines.append("")
-    lines.append("1. **Roughing** — 6 mm end mill, clear bulk to 0.5 mm above finish.")
-    lines.append("2. **3D finishing** — 1/8\" ball-nose, raster strategy across the relief.")
-    lines.append("3. **3D detail pass** — 1/16\" ball-nose, pencil/penciling strategy for fine detail.")
+    step = 1
+    lines.append(f"{step}. **Roughing** — 6 mm end mill, clear bulk to 0.5 mm above finish.")
+    step += 1
+    lines.append(f"{step}. **3D finishing** — 1/8\" ball-nose, raster strategy across the relief.")
+    step += 1
+    lines.append(f"{step}. **3D detail pass** — 1/16\" ball-nose, pencil/penciling strategy for fine detail.")
     if has_text:
-        lines.append("4. **V-carve text** — 60° v-bit.")
+        step += 1
+        lines.append(f"{step}. **V-carve text** — 60° v-bit.")
     if has_frame:
-        n = 5 if has_text else 4
-        lines.append(f"{n}. **Frame pocket / profile** — straight bit, multiple passes.")
+        step += 1
+        lines.append(f"{step}. **Frame pocket / profile** — straight bit, multiple passes.")
     lines.append("")
 
-    lines.append("## 5. Geometry used")
+    lines.append(section("Geometry used"))
     lines.append("")
     lines.append(f"- Max carve depth: **{_fmt_mm(max_depth)}**")
     lines.append(f"- Base thickness: **{_fmt_mm(base)}**")
