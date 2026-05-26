@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Iterable
 
 from google import genai
@@ -8,7 +9,11 @@ from google.genai import types
 
 from backend import config
 
-MODEL_ID = "gemini-2.5-flash-image-preview"
+# Default to "Nano Banana 2" — Gemini's current fast image model (May 2026).
+# Override via CNC_GEMINI_MODEL in .env if Google renames again, or to flip
+# to "gemini-3-pro-image-preview" (Nano Banana Pro) for higher quality at the
+# cost of speed.
+MODEL_ID = os.environ.get("CNC_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
 
 
 def _client() -> genai.Client:
