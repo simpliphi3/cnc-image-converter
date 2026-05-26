@@ -46,10 +46,37 @@ export default function Convert() {
   const [dimPresets, setDimPresets] = useState<DimensionPreset[]>([]);
   const [presetId, setPresetId] = useState<string>("custom");
   const [depthMode, setDepthMode] = useState<DepthMode>("ai");
+  const [autoSelectedLuminance, setAutoSelectedLuminance] = useState(false);
+  const [roleResolved, setRoleResolved] = useState(false);
 
   useEffect(() => {
     api.listDimensionPresets().then(setDimPresets).catch(() => {});
   }, []);
+
+  // Auto-pick depth mode based on the source image's role. AI bas-relief
+  // renders already have the carve baked into their luminance, so AI depth
+  // would just give us a silhouette of the subject — luminance is what we
+  // want. We gate the depth preview on roleResolved so we don't pay for an
+  // AI-mode preview only to immediately re-run in luminance mode.
+  useEffect(() => {
+    if (!projectId || !imageId) return;
+    let cancelled = false;
+    api
+      .getProject(projectId)
+      .then((data) => {
+        if (cancelled) return;
+        const img = data.images.find((i) => i.id === imageId);
+        if (img?.role === "ai_relief") {
+          setDepthMode("luminance");
+          setAutoSelectedLuminance(true);
+        }
+        setRoleResolved(true);
+      })
+      .catch(() => setRoleResolved(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, imageId]);
 
   function applyPreset(id: string) {
     setPresetId(id);
@@ -65,7 +92,7 @@ export default function Convert() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!imageId) return;
+      if (!imageId || !roleResolved) return;
       setDepthLoading(true);
       setDepthErr(null);
       try {
@@ -81,7 +108,7 @@ export default function Convert() {
     return () => {
       cancelled = true;
     };
-  }, [imageId, depthMode]);
+  }, [imageId, depthMode, roleResolved]);
 
   async function onConvert() {
     if (!imageId) return;
@@ -151,16 +178,28 @@ export default function Convert() {
             <label>Depth source</label>
             <select
               value={depthMode}
-              onChange={(e) => setDepthMode(e.target.value as DepthMode)}
+              onChange={(e) => {
+                setDepthMode(e.target.value as DepthMode);
+                setAutoSelectedLuminance(false);
+              }}
             >
               <option value="ai">AI depth — objects, animals, landscapes</option>
-              <option value="luminance">Image luminance — portraits, logos, line art</option>
+              <option value="luminance">
+                Image luminance — portraits, logos, line art, AI bas-relief renders
+              </option>
               <option value="hybrid">Hybrid — AI silhouette × luminance detail</option>
             </select>
-            <div className="muted" style={{ fontSize: 12 }}>
-              For portraits or stylized bas-relief artwork, luminance preserves
-              facial features that AI depth flattens out.
-            </div>
+            {autoSelectedLuminance ? (
+              <div className="ok" style={{ fontSize: 12 }}>
+                Auto-selected luminance because the source is an AI bas-relief
+                render (the carve is already baked into its lighting).
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 12 }}>
+                For portraits or stylized bas-relief artwork, luminance preserves
+                facial features that AI depth flattens out.
+              </div>
+            )}
           </div>
           <div>
             <label>Size preset</label>
