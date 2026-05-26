@@ -56,8 +56,11 @@ export default function Convert() {
   // Auto-pick depth mode based on the source image's role. AI bas-relief
   // renders already have the carve baked into their luminance, so AI depth
   // would just give us a silhouette of the subject — luminance is what we
-  // want. We gate the depth preview on roleResolved so we don't pay for an
-  // AI-mode preview only to immediately re-run in luminance mode.
+  // want. AI relief outputs also come back JPEG-encoded from Gemini/OpenAI,
+  // so we bump default smoothing to neutralize the 8×8 DCT block artifacts
+  // that would otherwise show as horizontal banding in the mesh.
+  // We gate the depth preview on roleResolved so we don't pay for an AI-mode
+  // preview only to immediately re-run in luminance mode.
   useEffect(() => {
     if (!projectId || !imageId) return;
     let cancelled = false;
@@ -69,6 +72,7 @@ export default function Convert() {
         if (img?.role === "ai_relief") {
           setDepthMode("luminance");
           setAutoSelectedLuminance(true);
+          setParams((prev) => ({ ...prev, gaussian_blur_sigma: 3.5 }));
         }
         setRoleResolved(true);
       })
