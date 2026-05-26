@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, DepthMode, DimensionPreset, ExportRec } from "../api";
+import StlViewer from "../components/StlViewer";
 
 type Params = {
   max_depth_mm: number;
@@ -39,6 +40,7 @@ export default function Convert() {
   const [exports, setExports] = useState<{
     stl: ExportRec;
     depth_png: ExportRec;
+    aspire_steps?: ExportRec;
   } | null>(null);
   const [name, setName] = useState("");
   const [dimPresets, setDimPresets] = useState<DimensionPreset[]>([]);
@@ -312,6 +314,17 @@ export default function Convert() {
                   {exports.depth_png.filename}
                 </a>
               </div>
+              {exports.aspire_steps && (
+                <div className="muted">
+                  Aspire steps:{" "}
+                  <a
+                    href={api.exportUrl(exports.aspire_steps.id)}
+                    download={exports.aspire_steps.filename}
+                  >
+                    {exports.aspire_steps.filename}
+                  </a>
+                </div>
+              )}
               {exports.stl.aspire_copy_path && (
                 <div className="ok">
                   Copied to Aspire folder: <code>{exports.stl.aspire_copy_path}</code>
@@ -328,6 +341,21 @@ export default function Convert() {
           )}
         </div>
       </div>
+
+      {exports && (
+        <div className="card col">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>
+              3D viewer — exactly what Aspire will see
+            </h3>
+            <div className="muted" style={{ fontSize: 12 }}>
+              The bit can't carve anything thinner than ~half its diameter, so
+              ground-truth here matters.
+            </div>
+          </div>
+          <StlViewer url={api.exportUrl(exports.stl.id)} height={500} />
+        </div>
+      )}
     </div>
   );
 }

@@ -12,12 +12,23 @@ export type ImageRec = {
   project_id: string;
   turn_id?: string | null;
   model?: string | null;
-  role: "reference" | "generated" | "depth" | "export";
+  role: "reference" | "generated" | "depth" | "export" | "ai_relief";
   filename: string;
   width?: number | null;
   height?: number | null;
   error?: string | null;
   created_at: number;
+};
+
+export type AiReliefRequest = {
+  image_id: string;
+  style: "memorial" | "portrait" | "scenic" | "sign_logo";
+  palette: "walnut" | "oak" | "cherry" | "maple";
+  frame: "none" | "simple" | "ornate";
+  text: string;
+  sunburst_background: boolean;
+  additional_notes: string;
+  provider: "gemini" | "openai";
 };
 
 export type Turn = {
@@ -34,7 +45,7 @@ export type ExportRec = {
   id: string;
   project_id: string;
   source_image_id?: string | null;
-  kind: "stl" | "svg" | "depth_png";
+  kind: "stl" | "svg" | "depth_png" | "aspire_steps";
   params: Record<string, unknown>;
   filename: string;
   aspire_copy_path?: string | null;
@@ -204,6 +215,12 @@ export const api = {
     if (!r.ok) throw new Error(await r.text());
     return r.blob();
   },
+
+  aiRelief: (req: AiReliefRequest) =>
+    jfetch<ImageRec>("/api/airelief", {
+      method: "POST",
+      body: JSON.stringify(req),
+    }),
 };
 
 export function relativeTime(ts: number): string {

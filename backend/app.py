@@ -19,7 +19,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import json
+
 from backend import config, presets
+from backend.airelief import aspire_companion, relief_gen
 from backend.depth import depth_anything
 from backend.image_gen import router as image_router
 from backend.mockup import render as mockup_render
@@ -250,8 +253,39 @@ async def api_convert(body: ConvertBody) -> dict[str, Any]:
         src_path=depth_png_path,
         aspire_folder=cfg.aspire_folder,
     )
+    aspire_steps_export = None
+    if img.get("role") == "ai_relief":
+        notes_path = proj_dir / f".airelief_notes_{body.image_id}.json"
+        notes: dict[str, Any] = {}
+        if notes_path.exists():
+            try:
+                notes = json.loads(notes_path.read_text())
+            except Exception:
+                pass
+        md_path = proj_dir / f"{base}_aspire_steps.md"
+        aspire_companion.write_steps(
+            md_path,
+            stl_basename=base,
+            stl_params=params.__dict__,
+            has_text=bool(notes.get("text")),
+            has_sunburst=bool(notes.get("sunburst_background", True)),
+            has_frame=(notes.get("frame", "simple") != "none"),
+            text=notes.get("text", ""),
+        )
+        aspire_steps_export = files.record_export(
+            project_id,
+            source_image_id=body.image_id,
+            kind="aspire_steps",
+            params={},
+            src_path=md_path,
+            aspire_folder=cfg.aspire_folder,
+        )
+
     projects.touch_project(project_id)
-    return {"stl": stl_export, "depth_png": depth_export}
+    out: dict[str, Any] = {"stl": stl_export, "depth_png": depth_export}
+    if aspire_steps_export is not None:
+        out["aspire_steps"] = aspire_steps_export
+    return out
 
 
 class VectorizeBody(BaseModel):
@@ -332,6 +366,86 @@ async def api_pick_folder(
         log.exception("folder picker failed")
         raise HTTPException(500, f"folder picker failed: {e}")
     return {"path": path}
+
+
+# --- AI bas-relief render (the STL source for portraits / signs / plaques) ---
+
+
+class AiReliefBody(BaseModel):
+    image_id: str
+    style: str = "portrait"
+    palette: str = "walnut"
+    frame: str = "simple"
+    text: str = ""
+    sunburst_background: bool = True
+    additional_notes: str = ""
+    provider: str = "gemini"
+
+
+@app.post("/api/airelief")
+async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
+    img = files.get_image(body.image_id)
+    if not img:
+        raise HTTPException(404, "image not found")
+    project_id = img["project_id"]
+    src_path = files.image_path(project_id, img["filename"])
+    if not src_path.exists():
+        raise HTTPException(404, "source image file missing")
+
+    req = relief_gen.AiReliefRequest(
+        style=body.style,  # type: ignore[arg-type]
+        palette=body.palette,
+        frame=body.frame,  # type: ignore[arg-type]
+        text=body.text.strip(),
+        sunburst_background=body.sunburst_background,
+        additional_notes=body.additional_notes.strip(),
+        provider=body.provider,  # type: ignore[arg-type]
+    )
+
+    cache_dir = files.project_dir(project_id)
+    cache_meta = cache_dir / f".airelief_{relief_gen.cache_key(body.image_id, req)}.json"
+    if cache_meta.exists():
+        try:
+            meta = json.loads(cache_meta.read_text())
+            existing = files.get_image(meta["image_id"])
+            if existing:
+                return existing
+        except Exception:
+            cache_meta.unlink(missing_ok=True)
+
+    src_bytes = src_path.read_bytes()
+    try:
+        png = await relief_gen.generate_relief(src_bytes, req)
+    except Exception as e:
+        log.exception("AI relief generation failed")
+        raise HTTPException(502, f"AI relief generation failed: {e}")
+
+    saved = files.save_image_bytes(
+        project_id,
+        png,
+        role="ai_relief",
+        model=req.provider,
+        extension="png",
+    )
+
+    notes_payload = {
+        "style": req.style,
+        "palette": req.palette,
+        "frame": req.frame,
+        "text": req.text,
+        "sunburst_background": req.sunburst_background,
+        "additional_notes": req.additional_notes,
+        "provider": req.provider,
+        "source_image_id": body.image_id,
+        "prompt": relief_gen.build_prompt(req),
+    }
+    (cache_dir / f".airelief_notes_{saved['id']}.json").write_text(
+        json.dumps(notes_payload, indent=2)
+    )
+    cache_meta.write_text(json.dumps({"image_id": saved["id"]}))
+
+    projects.touch_project(project_id, cover_image_id=saved["id"])
+    return saved
 
 
 # --- Mockup on wood ---

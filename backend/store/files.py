@@ -10,7 +10,7 @@ from PIL import Image
 from backend import config
 from backend.store import db
 
-ImageRole = Literal["reference", "generated", "depth", "export"]
+ImageRole = Literal["reference", "generated", "depth", "export", "ai_relief"]
 
 
 def project_dir(project_id: str) -> Path:
@@ -115,7 +115,7 @@ def record_export(
     project_id: str,
     *,
     source_image_id: str | None,
-    kind: Literal["stl", "svg", "depth_png"],
+    kind: Literal["stl", "svg", "depth_png", "aspire_steps"],
     params: dict[str, Any],
     src_path: Path,
     aspire_folder: str | None,
