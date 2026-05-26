@@ -1,0 +1,280 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, ExportRec } from "../api";
+
+type Params = {
+  max_depth_mm: number;
+  base_thickness_mm: number;
+  width_mm: number;
+  gaussian_blur_sigma: number;
+  background_threshold: number;
+  invert: boolean;
+  target_max_dim_px: number;
+  include_skirt: boolean;
+  close_bottom: boolean;
+  units: "mm" | "in";
+};
+
+const DEFAULTS: Params = {
+  max_depth_mm: 6.0,
+  base_thickness_mm: 3.0,
+  width_mm: 150.0,
+  gaussian_blur_sigma: 1.5,
+  background_threshold: 0.0,
+  invert: false,
+  target_max_dim_px: 600,
+  include_skirt: true,
+  close_bottom: true,
+  units: "mm",
+};
+
+export default function Convert() {
+  const { id: projectId, imageId } = useParams();
+  const navigate = useNavigate();
+  const [params, setParams] = useState<Params>(DEFAULTS);
+  const [depthUrl, setDepthUrl] = useState<string | null>(null);
+  const [depthLoading, setDepthLoading] = useState(false);
+  const [depthErr, setDepthErr] = useState<string | null>(null);
+  const [converting, setConverting] = useState(false);
+  const [exports, setExports] = useState<{
+    stl: ExportRec;
+    depth_png: ExportRec;
+  } | null>(null);
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!imageId) return;
+      setDepthLoading(true);
+      setDepthErr(null);
+      try {
+        const blob = await api.depthPreviewBlob(imageId);
+        if (!cancelled) setDepthUrl(URL.createObjectURL(blob));
+      } catch (e: any) {
+        if (!cancelled) setDepthErr(e.message || String(e));
+      } finally {
+        if (!cancelled) setDepthLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [imageId]);
+
+  async function onConvert() {
+    if (!imageId) return;
+    setConverting(true);
+    setExports(null);
+    try {
+      const out = await api.convert({
+        image_id: imageId,
+        params,
+        output_basename: name.trim() || undefined,
+      });
+      setExports(out);
+    } catch (e: any) {
+      alert(e.message || String(e));
+    } finally {
+      setConverting(false);
+    }
+  }
+
+  function num(key: keyof Params, label: string, min: number, max: number, step: number) {
+    const v = params[key] as number;
+    return (
+      <div>
+        <label>
+          {label}: <b>{v}</b>
+        </label>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={v}
+          onChange={(e) =>
+            setParams({ ...params, [key]: Number(e.target.value) })
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="col" style={{ gap: 14 }}>
+      <div className="row">
+        <button onClick={() => navigate(`/project/${projectId}`)}>← Back</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Convert to STL</h2>
+      </div>
+
+      <div className="split">
+        <div className="preview">
+          <div className="muted">Source image</div>
+          {imageId && <img src={api.imageUrl(imageId)} alt="source" />}
+          <div className="muted">AI depth map (Depth Anything V2)</div>
+          {depthLoading ? (
+            <div className="muted">
+              <span className="spinner" /> Estimating depth…
+            </div>
+          ) : depthErr ? (
+            <div className="error">{depthErr}</div>
+          ) : depthUrl ? (
+            <img src={depthUrl} alt="depth" />
+          ) : null}
+        </div>
+
+        <div className="card col">
+          <div>
+            <label>Carve width (physical X dimension)</label>
+            <input
+              type="number"
+              value={params.width_mm}
+              step={1}
+              onChange={(e) =>
+                setParams({ ...params, width_mm: Number(e.target.value) })
+              }
+            />
+            <div className="muted">In millimetres. Height is computed from image aspect ratio.</div>
+          </div>
+          {num("max_depth_mm", "Max carve depth (mm)", 0.5, 30, 0.1)}
+          {num("base_thickness_mm", "Base thickness (mm)", 0, 20, 0.5)}
+          {num("gaussian_blur_sigma", "Smoothing (blur σ)", 0, 6, 0.1)}
+          {num("background_threshold", "Background flatten threshold", 0, 0.5, 0.01)}
+          {num("target_max_dim_px", "Mesh resolution (max dim, px)", 200, 1200, 50)}
+
+          <div className="row">
+            <label
+              style={{
+                display: "inline-flex",
+                gap: 6,
+                textTransform: "none",
+                letterSpacing: 0,
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={params.invert}
+                onChange={(e) =>
+                  setParams({ ...params, invert: e.target.checked })
+                }
+              />
+              Invert (dark = high)
+            </label>
+            <label
+              style={{
+                display: "inline-flex",
+                gap: 6,
+                textTransform: "none",
+                letterSpacing: 0,
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={params.include_skirt}
+                onChange={(e) =>
+                  setParams({ ...params, include_skirt: e.target.checked })
+                }
+              />
+              Skirt walls
+            </label>
+            <label
+              style={{
+                display: "inline-flex",
+                gap: 6,
+                textTransform: "none",
+                letterSpacing: 0,
+                fontSize: 13,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={params.close_bottom}
+                onChange={(e) =>
+                  setParams({ ...params, close_bottom: e.target.checked })
+                }
+              />
+              Closed bottom
+            </label>
+          </div>
+
+          <div>
+            <label>Export units</label>
+            <select
+              value={params.units}
+              onChange={(e) =>
+                setParams({
+                  ...params,
+                  units: e.target.value as "mm" | "in",
+                })
+              }
+            >
+              <option value="mm">Millimetres</option>
+              <option value="in">Inches</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Output filename (without extension)</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. eagle_plaque"
+            />
+          </div>
+
+          <button
+            className="primary"
+            onClick={onConvert}
+            disabled={converting}
+          >
+            {converting ? (
+              <>
+                <span className="spinner" /> Building STL…
+              </>
+            ) : (
+              "Export STL + 16-bit depth PNG"
+            )}
+          </button>
+
+          {exports && (
+            <div className="col" style={{ gap: 6 }}>
+              <div className="ok">Exported.</div>
+              <div className="muted">
+                STL:{" "}
+                <a href={api.exportUrl(exports.stl.id)} download={exports.stl.filename}>
+                  {exports.stl.filename}
+                </a>
+              </div>
+              <div className="muted">
+                Depth PNG:{" "}
+                <a
+                  href={api.exportUrl(exports.depth_png.id)}
+                  download={exports.depth_png.filename}
+                >
+                  {exports.depth_png.filename}
+                </a>
+              </div>
+              {exports.stl.aspire_copy_path && (
+                <div className="ok">
+                  Copied to Aspire folder: <code>{exports.stl.aspire_copy_path}</code>
+                </div>
+              )}
+              {!exports.stl.aspire_copy_path && (
+                <div className="muted">
+                  No Aspire folder set. Configure it in{" "}
+                  <a onClick={() => navigate("/settings")}>Settings</a> to have
+                  files saved directly there.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
