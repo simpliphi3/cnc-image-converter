@@ -14,10 +14,11 @@ from scipy.ndimage import gaussian_filter
 Palette = Literal["walnut", "oak", "cherry", "maple"]
 
 PALETTES: dict[str, dict] = {
-    "walnut": {"light": (170, 120, 80), "dark": (70, 40, 22),  "ring_freq": 0.10, "ring_jitter": 6.0},
-    "oak":    {"light": (230, 195, 145), "dark": (140, 95, 55), "ring_freq": 0.07, "ring_jitter": 8.0},
-    "cherry": {"light": (205, 130, 95), "dark": (110, 50, 35), "ring_freq": 0.09, "ring_jitter": 7.0},
-    "maple":  {"light": (240, 215, 175), "dark": (185, 145, 105), "ring_freq": 0.12, "ring_jitter": 5.0},
+    # contrast = how strongly rings stand out (0..1)
+    "walnut": {"light": (135, 95, 65),  "dark": (75, 45, 28),  "contrast": 0.55},
+    "oak":    {"light": (215, 180, 135), "dark": (160, 115, 75), "contrast": 0.45},
+    "cherry": {"light": (180, 115, 85), "dark": (120, 65, 45),  "contrast": 0.50},
+    "maple":  {"light": (235, 210, 170), "dark": (195, 165, 125), "contrast": 0.35},
 }
 
 
@@ -27,34 +28,72 @@ def make_wood_texture(
     palette: Palette = "walnut",
     seed: int = 0,
 ) -> np.ndarray:
-    """Returns a float32 RGB array shape (h, w, 3) with values in 0..255."""
+    """Returns a float32 RGB array shape (h, w, 3) with values in 0..255.
+
+    Plank-style flat-sawn grain: mostly parallel lines along one axis with a
+    very gentle long-wavelength wave, soft fiber noise along the grain, and a
+    couple of optional low-contrast figure marks. Tuned to look like a sanded
+    board, not a leather hide.
+    """
     pal = PALETTES.get(palette, PALETTES["walnut"])
     rng = np.random.default_rng(seed)
 
     y, x = np.mgrid[0:h, 0:w].astype(np.float32)
-    # Place the ring center far below the image so the visible grain looks
-    # near-parallel — typical for a plaque cut from the side of the log.
-    cx = w * 0.5
-    cy = h * 3.5
-    d = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+    long_side = float(max(h, w))
 
-    # Low-frequency turbulence smoothed into something organic.
-    noise = (rng.random((h, w), dtype=np.float32) - 0.5) * 12.0
-    noise = gaussian_filter(noise, sigma=4.0)
+    # Lay grain along the LONG axis. For a portrait image (h > w), grain runs
+    # vertically; for landscape, horizontally. Use `along` for the direction
+    # PARALLEL to grain and `across` for PERPENDICULAR (where rings stack up).
+    if h >= w:
+        along, across = y, x
+    else:
+        along, across = x, y
 
-    # Ring pattern (annual growth rings, perturbed by noise).
-    rings = np.sin((d + noise * pal["ring_jitter"]) * pal["ring_freq"])
-    rings = (rings + 1.0) * 0.5
+    # Aim for ~8 visible grain lines on the across-grain axis.
+    cross_extent = float(np.ptp(across))
+    target_rings = 8.0
+    ring_period = max(8.0, cross_extent / target_rings)
 
-    # Fine grain stripes (lengthwise micro-grain).
-    fine_grain = np.sin((x / 2.8) + noise * 0.4)
-    fine_grain = (fine_grain * 0.5 + 0.5) * 0.12
+    # Two very gentle long waves so grain isn't pin-straight. Tiny amplitude
+    # relative to image — gives a subtle cathedral curve.
+    phase = rng.random() * 6.28
+    wave_amp = ring_period * 0.20
+    wave_wl = long_side * 0.9
+    waved = across + wave_amp * np.sin(2 * np.pi * along / wave_wl + phase)
+    waved += wave_amp * 0.4 * np.sin(2 * np.pi * along / (wave_wl * 0.43) + phase * 1.7)
 
-    blend = np.clip(rings * 0.85 + fine_grain, 0.0, 1.0)
+    # Very slight per-pixel perpendicular jitter for organic edges. SMALL.
+    # Gaussian-smoothed along the grain so it doesn't add high-frequency noise.
+    if h >= w:
+        jitter_sigma = (long_side * 0.04, max(1.0, long_side * 0.003))
+    else:
+        jitter_sigma = (max(1.0, long_side * 0.003), long_side * 0.04)
+    jitter = (rng.random((h, w), dtype=np.float32) - 0.5)
+    jitter = gaussian_filter(jitter, sigma=jitter_sigma)
+    jitter /= max(jitter.std(), 1e-6)
+    waved = waved + jitter * ring_period * 0.06
+
+    # Grain lines: lightly sharpened sine.
+    base = np.sin(waved * (2 * np.pi / ring_period))
+    rings = 0.5 + 0.5 * np.sign(base) * (np.abs(base) ** 0.7)
+
+    # Soft along-grain fiber: low-contrast streaks parallel to the grain.
+    fiber_sigma = (
+        (max(0.5, long_side * 0.0006), long_side * 0.02)
+        if h >= w else
+        (long_side * 0.02, max(0.5, long_side * 0.0006))
+    )
+    fiber = gaussian_filter(
+        (rng.random((h, w), dtype=np.float32) - 0.5), sigma=fiber_sigma
+    )
+    fiber /= max(fiber.std(), 1e-6)
+
+    value = 0.5 + (rings - 0.5) * pal["contrast"] + fiber * 0.07
+    value = np.clip(value, 0.0, 1.0)
 
     light = np.array(pal["light"], dtype=np.float32)
     dark = np.array(pal["dark"], dtype=np.float32)
-    rgb = dark[None, None, :] + (light - dark)[None, None, :] * blend[..., None]
+    rgb = dark[None, None, :] + (light - dark)[None, None, :] * value[..., None]
     return rgb
 
 

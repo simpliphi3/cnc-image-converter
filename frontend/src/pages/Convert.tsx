@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, DimensionPreset, ExportRec } from "../api";
+import { api, DepthMode, DimensionPreset, ExportRec } from "../api";
 
 type Params = {
   max_depth_mm: number;
@@ -43,6 +43,7 @@ export default function Convert() {
   const [name, setName] = useState("");
   const [dimPresets, setDimPresets] = useState<DimensionPreset[]>([]);
   const [presetId, setPresetId] = useState<string>("custom");
+  const [depthMode, setDepthMode] = useState<DepthMode>("ai");
 
   useEffect(() => {
     api.listDimensionPresets().then(setDimPresets).catch(() => {});
@@ -66,7 +67,7 @@ export default function Convert() {
       setDepthLoading(true);
       setDepthErr(null);
       try {
-        const blob = await api.depthPreviewBlob(imageId);
+        const blob = await api.depthPreviewBlob(imageId, depthMode);
         if (!cancelled) setDepthUrl(URL.createObjectURL(blob));
       } catch (e: any) {
         if (!cancelled) setDepthErr(e.message || String(e));
@@ -78,7 +79,7 @@ export default function Convert() {
     return () => {
       cancelled = true;
     };
-  }, [imageId]);
+  }, [imageId, depthMode]);
 
   async function onConvert() {
     if (!imageId) return;
@@ -89,7 +90,8 @@ export default function Convert() {
         image_id: imageId,
         params,
         output_basename: name.trim() || undefined,
-      });
+        depth_mode: depthMode,
+      } as any);
       setExports(out);
     } catch (e: any) {
       alert(e.message || String(e));
@@ -143,6 +145,21 @@ export default function Convert() {
         </div>
 
         <div className="card col">
+          <div>
+            <label>Depth source</label>
+            <select
+              value={depthMode}
+              onChange={(e) => setDepthMode(e.target.value as DepthMode)}
+            >
+              <option value="ai">AI depth — objects, animals, landscapes</option>
+              <option value="luminance">Image luminance — portraits, logos, line art</option>
+              <option value="hybrid">Hybrid — AI silhouette × luminance detail</option>
+            </select>
+            <div className="muted" style={{ fontSize: 12 }}>
+              For portraits or stylized bas-relief artwork, luminance preserves
+              facial features that AI depth flattens out.
+            </div>
+          </div>
           <div>
             <label>Size preset</label>
             <select

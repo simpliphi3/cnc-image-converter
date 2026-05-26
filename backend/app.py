@@ -167,27 +167,26 @@ def api_image_file(image_id: str) -> FileResponse:
     return FileResponse(p)
 
 
-async def _depth_for_image(image_id: str) -> tuple[np.ndarray, dict[str, Any]]:
-    """Run (or load cached) depth estimation for a stored image.
+async def _depth_for_image(
+    image_id: str, mode: depth_anything.DepthMode = "ai"
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Run (or load cached) depth map for a stored image, by mode.
 
-    Depth estimation is the slowest step on CPU (~20-40 s on a small DA-V2). The
-    user may visit Convert, Mockup, then Convert again — running it once and
-    caching to disk avoids repeating that wait. Cache invalidates by image_id,
-    which is stable per generated/uploaded image, so it's correct even when the
-    user iterates and picks a different result.
+    Cache is keyed by (image_id, mode) so flipping modes doesn't re-run an
+    expensive AI inference, and each mode's result is independently cached.
     """
     img = files.get_image(image_id)
     if not img:
         raise HTTPException(404, "image not found")
     project_id = img["project_id"]
-    cache = files.project_dir(project_id) / f".depth_{image_id}.npy"
+    cache = files.project_dir(project_id) / f".depth_{mode}_{image_id}.npy"
     if cache.exists():
         try:
             return np.load(cache), img
         except Exception:
             cache.unlink(missing_ok=True)
     src = files.image_path(project_id, img["filename"])
-    depth = await depth_anything.estimate(src.read_bytes())
+    depth = await depth_anything.depth_by_mode(src.read_bytes(), mode)
     try:
         np.save(cache, depth.astype(np.float32))
     except Exception:
@@ -197,11 +196,12 @@ async def _depth_for_image(image_id: str) -> tuple[np.ndarray, dict[str, Any]]:
 
 class DepthPreviewBody(BaseModel):
     image_id: str
+    mode: depth_anything.DepthMode = "ai"
 
 
 @app.post("/api/depth/preview")
 async def api_depth_preview(body: DepthPreviewBody) -> Response:
-    depth01, _ = await _depth_for_image(body.image_id)
+    depth01, _ = await _depth_for_image(body.image_id, body.mode)
     png = depth_anything.depth_to_png_8bit_preview(depth01)
     return Response(content=png, media_type="image/png")
 
@@ -210,11 +210,12 @@ class ConvertBody(BaseModel):
     image_id: str
     params: dict[str, Any] = {}
     output_basename: str | None = None
+    depth_mode: depth_anything.DepthMode = "ai"
 
 
 @app.post("/api/convert")
 async def api_convert(body: ConvertBody) -> dict[str, Any]:
-    depth01, img = await _depth_for_image(body.image_id)
+    depth01, img = await _depth_for_image(body.image_id, body.depth_mode)
     project_id = img["project_id"]
 
     p_kwargs = {k: v for k, v in body.params.items() if v is not None}
@@ -350,11 +351,12 @@ class MockupBody(BaseModel):
     invert: bool = False
     background_threshold: float = 0.0
     max_dim_px: int = 900
+    depth_mode: depth_anything.DepthMode = "ai"
 
 
 @app.post("/api/mockup")
 async def api_mockup(body: MockupBody) -> Response:
-    depth01, _ = await _depth_for_image(body.image_id)
+    depth01, _ = await _depth_for_image(body.image_id, body.depth_mode)
     params = mockup_render.MockupParams(
         palette=body.palette,  # type: ignore[arg-type]
         wood_seed=body.wood_seed,

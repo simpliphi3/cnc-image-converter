@@ -57,6 +57,8 @@ export type DimensionPreset = {
   max_depth_mm: number | null;
 };
 
+export type DepthMode = "ai" | "luminance" | "hybrid";
+
 export type MockupParams = {
   palette: "walnut" | "oak" | "cherry" | "maple";
   wood_seed: number;
@@ -70,6 +72,7 @@ export type MockupParams = {
   invert: boolean;
   background_threshold: number;
   max_dim_px: number;
+  depth_mode: DepthMode;
 };
 
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -167,11 +170,14 @@ export const api = {
   imageUrl: (id: string) => `/api/images/${id}/file`,
   exportUrl: (id: string) => `/api/exports/${id}/file`,
 
-  depthPreviewBlob: async (imageId: string): Promise<Blob> => {
+  depthPreviewBlob: async (
+    imageId: string,
+    mode: DepthMode = "ai"
+  ): Promise<Blob> => {
     const r = await fetch("/api/depth/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_id: imageId }),
+      body: JSON.stringify({ image_id: imageId, mode }),
     });
     if (!r.ok) throw new Error(await r.text());
     return r.blob();

@@ -22,7 +22,14 @@ const DEFAULTS: MockupParams = {
   invert: false,
   background_threshold: 0,
   max_dim_px: 900,
+  depth_mode: "ai",
 };
+
+const DEPTH_MODES: { id: MockupParams["depth_mode"]; label: string; hint: string }[] = [
+  { id: "ai",       label: "AI depth", hint: "Best for objects, animals, landscapes." },
+  { id: "luminance",label: "Image luminance", hint: "Best for portraits, logos, line art — preserves every feature." },
+  { id: "hybrid",   label: "Hybrid",  hint: "AI silhouette × luminance detail. Try if AI alone goes too flat." },
+];
 
 export default function Mockup() {
   const { id: projectId, imageId } = useParams();
@@ -133,6 +140,28 @@ export default function Mockup() {
         </div>
 
         <div className="card col">
+          <div>
+            <label>Depth source</label>
+            <select
+              value={params.depth_mode}
+              onChange={(e) =>
+                setParams({
+                  ...params,
+                  depth_mode: e.target.value as MockupParams["depth_mode"],
+                })
+              }
+            >
+              {DEPTH_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {DEPTH_MODES.find((m) => m.id === params.depth_mode)?.hint}
+            </div>
+          </div>
+
           <div>
             <label>Wood species</label>
             <select
