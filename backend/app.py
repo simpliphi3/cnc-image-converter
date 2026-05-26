@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from fastapi import (
     Body,
     FastAPI,
@@ -18,11 +19,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from backend import config
+from backend import config, presets
 from backend.depth import depth_anything
 from backend.image_gen import router as image_router
+from backend.mockup import render as mockup_render
 from backend.stl import heightmap_to_stl as stl_mod
 from backend.store import files, projects
+from backend.system import folder_picker
 from backend.vectorize import potrace_wrap
 
 logging.basicConfig(level=logging.INFO)
@@ -164,17 +167,41 @@ def api_image_file(image_id: str) -> FileResponse:
     return FileResponse(p)
 
 
+async def _depth_for_image(image_id: str) -> tuple[np.ndarray, dict[str, Any]]:
+    """Run (or load cached) depth estimation for a stored image.
+
+    Depth estimation is the slowest step on CPU (~20-40 s on a small DA-V2). The
+    user may visit Convert, Mockup, then Convert again — running it once and
+    caching to disk avoids repeating that wait. Cache invalidates by image_id,
+    which is stable per generated/uploaded image, so it's correct even when the
+    user iterates and picks a different result.
+    """
+    img = files.get_image(image_id)
+    if not img:
+        raise HTTPException(404, "image not found")
+    project_id = img["project_id"]
+    cache = files.project_dir(project_id) / f".depth_{image_id}.npy"
+    if cache.exists():
+        try:
+            return np.load(cache), img
+        except Exception:
+            cache.unlink(missing_ok=True)
+    src = files.image_path(project_id, img["filename"])
+    depth = await depth_anything.estimate(src.read_bytes())
+    try:
+        np.save(cache, depth.astype(np.float32))
+    except Exception:
+        pass
+    return depth, img
+
+
 class DepthPreviewBody(BaseModel):
     image_id: str
 
 
 @app.post("/api/depth/preview")
 async def api_depth_preview(body: DepthPreviewBody) -> Response:
-    img = files.get_image(body.image_id)
-    if not img:
-        raise HTTPException(404, "image not found")
-    p = files.image_path(img["project_id"], img["filename"])
-    depth01 = await depth_anything.estimate(p.read_bytes())
+    depth01, _ = await _depth_for_image(body.image_id)
     png = depth_anything.depth_to_png_8bit_preview(depth01)
     return Response(content=png, media_type="image/png")
 
@@ -187,14 +214,8 @@ class ConvertBody(BaseModel):
 
 @app.post("/api/convert")
 async def api_convert(body: ConvertBody) -> dict[str, Any]:
-    img = files.get_image(body.image_id)
-    if not img:
-        raise HTTPException(404, "image not found")
+    depth01, img = await _depth_for_image(body.image_id)
     project_id = img["project_id"]
-    src_path = files.image_path(project_id, img["filename"])
-    image_bytes = src_path.read_bytes()
-
-    depth01 = await depth_anything.estimate(image_bytes)
 
     p_kwargs = {k: v for k, v in body.params.items() if v is not None}
     params = stl_mod.StlParams(**p_kwargs)
@@ -283,6 +304,77 @@ def api_export_file(export_id: str) -> FileResponse:
     if not p.exists():
         raise HTTPException(404, "export file missing")
     return FileResponse(p, filename=row["filename"])
+
+
+# --- Presets ---
+
+
+@app.get("/api/presets/dimensions")
+def api_dimension_presets() -> list[dict[str, Any]]:
+    return [dict(p) for p in presets.DIMENSION_PRESETS]
+
+
+# --- Native folder picker (Windows Tkinter dialog on the host) ---
+
+
+class PickFolderBody(BaseModel):
+    initial_dir: str | None = None
+
+
+@app.post("/api/system/pick_folder")
+async def api_pick_folder(
+    body: PickFolderBody = Body(default_factory=PickFolderBody),
+) -> dict[str, Any]:
+    try:
+        path = await folder_picker.pick_folder(body.initial_dir)
+    except Exception as e:
+        log.exception("folder picker failed")
+        raise HTTPException(500, f"folder picker failed: {e}")
+    return {"path": path}
+
+
+# --- Mockup on wood ---
+
+
+class MockupBody(BaseModel):
+    image_id: str
+    palette: str = "walnut"
+    wood_seed: int = 7
+    relief_scale: float = 60.0
+    ambient: float = 0.35
+    ao_strength: float = 0.35
+    light_x: float = -0.55
+    light_y: float = -0.55
+    light_z: float = 0.62
+    smoothing: float = 1.2
+    invert: bool = False
+    background_threshold: float = 0.0
+    max_dim_px: int = 900
+
+
+@app.post("/api/mockup")
+async def api_mockup(body: MockupBody) -> Response:
+    depth01, _ = await _depth_for_image(body.image_id)
+    params = mockup_render.MockupParams(
+        palette=body.palette,  # type: ignore[arg-type]
+        wood_seed=body.wood_seed,
+        relief_scale=body.relief_scale,
+        ambient=body.ambient,
+        ao_strength=body.ao_strength,
+        light_x=body.light_x,
+        light_y=body.light_y,
+        light_z=body.light_z,
+        smoothing=body.smoothing,
+        invert=body.invert,
+        background_threshold=body.background_threshold,
+        max_dim_px=body.max_dim_px,
+    )
+    jpg = await mockup_render.render(depth01, params)
+    return Response(
+        content=jpg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # --- Static frontend ---

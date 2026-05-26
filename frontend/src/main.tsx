@@ -6,6 +6,7 @@ import Gallery from "./pages/Gallery";
 import Project from "./pages/Project";
 import Convert from "./pages/Convert";
 import Vectorize from "./pages/Vectorize";
+import Mockup from "./pages/Mockup";
 import Settings from "./pages/Settings";
 import Layout from "./Layout";
 import "./styles.css";
@@ -19,6 +20,7 @@ const router = createHashRouter([
       { path: "project/:id", element: <Project /> },
       { path: "project/:id/convert/:imageId", element: <Convert /> },
       { path: "project/:id/vectorize/:imageId", element: <Vectorize /> },
+      { path: "project/:id/mockup/:imageId", element: <Mockup /> },
       { path: "settings", element: <Settings /> },
     ],
   },

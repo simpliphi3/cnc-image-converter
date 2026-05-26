@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, ExportRec } from "../api";
+import { api, DimensionPreset, ExportRec } from "../api";
 
 type Params = {
   max_depth_mm: number;
@@ -41,6 +41,23 @@ export default function Convert() {
     depth_png: ExportRec;
   } | null>(null);
   const [name, setName] = useState("");
+  const [dimPresets, setDimPresets] = useState<DimensionPreset[]>([]);
+  const [presetId, setPresetId] = useState<string>("custom");
+
+  useEffect(() => {
+    api.listDimensionPresets().then(setDimPresets).catch(() => {});
+  }, []);
+
+  function applyPreset(id: string) {
+    setPresetId(id);
+    const p = dimPresets.find((x) => x.id === id);
+    if (!p) return;
+    setParams((prev) => ({
+      ...prev,
+      width_mm: p.width_mm ?? prev.width_mm,
+      max_depth_mm: p.max_depth_mm ?? prev.max_depth_mm,
+    }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +143,25 @@ export default function Convert() {
         </div>
 
         <div className="card col">
+          <div>
+            <label>Size preset</label>
+            <select
+              value={presetId}
+              onChange={(e) => applyPreset(e.target.value)}
+            >
+              {dimPresets.length === 0 && (
+                <option value="custom">Custom — set values manually</option>
+              )}
+              {dimPresets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <div className="muted">
+              Sets carve width + a sensible default depth. Tweak below.
+            </div>
+          </div>
           <div>
             <label>Carve width (physical X dimension)</label>
             <input

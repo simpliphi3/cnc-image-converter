@@ -30,6 +30,19 @@ export default function Settings() {
     }
   }
 
+  const [picking, setPicking] = useState(false);
+  async function onBrowse() {
+    setPicking(true);
+    try {
+      const r = await api.pickFolder(folder || null);
+      if (r.path) setFolder(r.path);
+    } catch (e: any) {
+      alert(`Folder picker failed: ${e.message || e}`);
+    } finally {
+      setPicking(false);
+    }
+  }
+
   if (!s) return <div className="muted">Loading…</div>;
 
   return (
@@ -41,12 +54,17 @@ export default function Settings() {
           should be copied. Point this at the folder your Aspire library reads
           from and they'll just appear there.
         </div>
-        <input
-          type="text"
-          value={folder}
-          onChange={(e) => setFolder(e.target.value)}
-          placeholder="e.g. C:\Users\dad\Documents\Aspire Imports"
-        />
+        <div className="row" style={{ alignItems: "stretch" }}>
+          <input
+            type="text"
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            placeholder="e.g. C:\Users\dad\Documents\Aspire Imports"
+          />
+          <button onClick={onBrowse} disabled={picking}>
+            {picking ? "…" : "Browse…"}
+          </button>
+        </div>
         <div>
           <label>Default export units</label>
           <select

@@ -50,6 +50,28 @@ export type Settings = {
   depth: { device: string; model: string | null; loaded: boolean };
 };
 
+export type DimensionPreset = {
+  id: string;
+  name: string;
+  width_mm: number | null;
+  max_depth_mm: number | null;
+};
+
+export type MockupParams = {
+  palette: "walnut" | "oak" | "cherry" | "maple";
+  wood_seed: number;
+  relief_scale: number;
+  ambient: number;
+  ao_strength: number;
+  light_x: number;
+  light_y: number;
+  light_z: number;
+  smoothing: number;
+  invert: boolean;
+  background_threshold: number;
+  max_dim_px: number;
+};
+
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
@@ -150,6 +172,28 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image_id: imageId }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.blob();
+  },
+
+  listDimensionPresets: () =>
+    jfetch<DimensionPreset[]>("/api/presets/dimensions"),
+
+  pickFolder: (initialDir?: string | null) =>
+    jfetch<{ path: string | null }>("/api/system/pick_folder", {
+      method: "POST",
+      body: JSON.stringify({ initial_dir: initialDir ?? null }),
+    }),
+
+  mockupBlob: async (
+    imageId: string,
+    params: Partial<MockupParams>
+  ): Promise<Blob> => {
+    const r = await fetch("/api/mockup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_id: imageId, ...params }),
     });
     if (!r.ok) throw new Error(await r.text());
     return r.blob();

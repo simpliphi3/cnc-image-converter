@@ -284,6 +284,14 @@ export default function Project() {
                           Use as reference for next turn
                         </button>
                         <button
+                          onClick={() =>
+                            navigate(`/project/${projectId}/mockup/${img.id}`)
+                          }
+                          title="See what this would look like carved into wood"
+                        >
+                          Mockup on wood
+                        </button>
+                        <button
                           className="primary"
                           onClick={() =>
                             navigate(`/project/${projectId}/convert/${img.id}`)
