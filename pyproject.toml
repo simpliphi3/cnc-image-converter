@@ -2,7 +2,7 @@
 name = "cnc-image-converter"
 version = "0.1.0"
 description = "Local web app: GenAI image generation + image-to-STL conversion for Vectric Aspire CNC workflows."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
