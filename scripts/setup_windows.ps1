@@ -21,6 +21,20 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+Write-Step "Checking for NVIDIA GPU"
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    $smi = nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>$null
+    if ($smi) {
+        Write-Host "Detected NVIDIA GPU: $smi"
+        Write-Host "PyTorch will be installed with CUDA 12.4 support."
+        Write-Host "(Requires NVIDIA driver >= 525. If depth inference fails, update the driver from nvidia.com.)"
+    } else {
+        Write-Host "nvidia-smi present but returned no GPU. Continuing with CPU-only setup."
+    }
+} else {
+    Write-Host "No NVIDIA GPU detected. Depth Anything V2 will run on CPU (slower but works)."
+}
+
 Write-Step "Creating Python environment and installing backend deps"
 uv sync
 
