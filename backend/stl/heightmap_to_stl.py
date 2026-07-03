@@ -14,6 +14,10 @@ Units = Literal["mm", "in"]
 _DETAIL_RADIUS_PX = 2.0  # blur radius for the unsharp-mask high-pass
 _DETAIL_MAX_GAIN = 1.5   # sharpening applied at detail = 1.0
 
+_BILATERAL_MAX_SIGMA = 5.0    # strength 1.0 -> spatial sigma of 1 + this
+_BILATERAL_RANGE = 0.15      # tonal edges bigger than this are preserved
+_BILATERAL_MAX_RADIUS = 10   # cap the window so cost stays bounded
+
 
 @dataclass
 class StlParams:
@@ -21,13 +25,15 @@ class StlParams:
     base_thickness_mm: float = 3.0
     width_mm: float = 150.0           # physical width of the carved area
     gaussian_blur_sigma: float = 1.5  # smooths noisy depth maps
+    bilateral_strength: float = 0.0   # 0..1 edge-preserving smoothing (flatten bg, keep edges)
     detail: float = 0.0               # 0..1 unsharp strength; re-emphasizes fine relief
+    curve_points: list | None = None  # [[x,y],...] tonal remap; None = linear (identity)
     background_threshold: float = 0.0  # values <= this are flattened to 0
     invert: bool = False              # set True if dark = high looks better
     target_max_dim_px: int = 600      # downsample heightmap before meshing
     include_skirt: bool = True        # add a vertical wall around the perimeter
     close_bottom: bool = True         # add a flat bottom face for a watertight mesh
-    units: Units = "mm"
+    units: Units = "in"
 
     def to_export_units_scale(self) -> float:
         return 1.0 if self.units == "mm" else 1.0 / 25.4
@@ -49,12 +55,55 @@ def _resample(depth01: np.ndarray, target_max_dim: int) -> np.ndarray:
     return zoom(depth01, s, order=1).astype(np.float32)
 
 
+def _bilateral(d: np.ndarray, spatial_sigma: float, range_sigma: float) -> np.ndarray:
+    """Edge-preserving smoothing: average each pixel with neighbours weighted by
+    both distance (spatial) and height similarity (range). Flat regions smooth
+    fully while pixels across a real height edge get near-zero weight, so subject
+    outlines stay crisp — the local analog of EasyCreate's segmented background.
+    """
+    radius = int(max(1, min(_BILATERAL_MAX_RADIUS, round(spatial_sigma * 2))))
+    padded = np.pad(d, radius, mode="edge")
+    h, w = d.shape
+    out = np.zeros_like(d)
+    wsum = np.zeros_like(d)
+    two_sr2 = 2.0 * spatial_sigma * spatial_sigma
+    two_rr2 = 2.0 * range_sigma * range_sigma
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            shifted = padded[radius + dy : radius + dy + h, radius + dx : radius + dx + w]
+            spatial_w = float(np.exp(-(dx * dx + dy * dy) / two_sr2))
+            range_w = np.exp(-((shifted - d) ** 2) / two_rr2)
+            weight = spatial_w * range_w
+            out += weight * shifted
+            wsum += weight
+    return (out / wsum).astype(np.float32)
+
+
+def _apply_curve(d: np.ndarray, points: list) -> np.ndarray:
+    """Remap heights through a monotonic control-point curve (piecewise linear).
+
+    x = input height 0..1, y = output height 0..1. An S-curve pushes highlights
+    (faces) up and shadows (background) down, restoring bas-relief hierarchy.
+    """
+    pts = sorted(([float(x), float(y)] for x, y in points), key=lambda pt: pt[0])
+    xs = np.array([pt[0] for pt in pts], dtype=np.float32)
+    ys = np.array([pt[1] for pt in pts], dtype=np.float32)
+    return np.interp(d, xs, ys).astype(np.float32)
+
+
 def _process_depth(depth01: np.ndarray, p: StlParams) -> np.ndarray:
     d = depth01.astype(np.float32)
     if p.invert:
         d = 1.0 - d
+    # Resample first so every shaping step below runs at the final mesh
+    # resolution — bounds the cost of the bilateral pass and means what we
+    # shape is exactly what gets meshed.
+    d = _resample(d, p.target_max_dim_px)
     if p.gaussian_blur_sigma and p.gaussian_blur_sigma > 0:
         d = gaussian_filter(d, sigma=float(p.gaussian_blur_sigma))
+    if p.bilateral_strength and p.bilateral_strength > 0:
+        spatial = 1.0 + float(p.bilateral_strength) * _BILATERAL_MAX_SIGMA
+        d = _bilateral(d, spatial_sigma=spatial, range_sigma=_BILATERAL_RANGE)
     if p.detail and p.detail > 0:
         # Unsharp mask: re-emphasize genuine relief after the denoise blur.
         # final = d + k*A*(d - blur(d)) is algebraically the raw/enhanced
@@ -69,7 +118,10 @@ def _process_depth(depth01: np.ndarray, p: StlParams) -> np.ndarray:
     m = d.max()
     if m > 0:
         d = d / m
-    d = _resample(d, p.target_max_dim_px)
+    # Curve remap runs on the normalized [0,1] range, after threshold — matching
+    # EasyCreate's transformation order (threshold -> height curve).
+    if p.curve_points:
+        d = _apply_curve(d, p.curve_points)
     return d
 
 

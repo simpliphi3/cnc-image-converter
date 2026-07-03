@@ -8,7 +8,9 @@ type Params = {
   base_thickness_mm: number;
   width_mm: number;
   gaussian_blur_sigma: number;
+  bilateral_strength: number;
   detail: number;
+  curve_points: number[][] | null;
   background_threshold: number;
   invert: boolean;
   target_max_dim_px: number;
@@ -22,13 +24,25 @@ const DEFAULTS: Params = {
   base_thickness_mm: 3.0,
   width_mm: 150.0,
   gaussian_blur_sigma: 1.5,
+  bilateral_strength: 0.0,
   detail: 0.0,
+  curve_points: null,
   background_threshold: 0.0,
   invert: false,
   target_max_dim_px: 600,
   include_skirt: true,
   close_bottom: true,
-  units: "mm",
+  units: "in",
+};
+
+// Height-curve presets: S-curves that push highlights (faces) up and shadows
+// (background) down to restore bas-relief hierarchy, matching EasyCreate's
+// Linear/Gentle/Medium/Aggressive remap presets. null = linear (identity).
+const CURVE_PRESETS: Record<string, number[][] | null> = {
+  linear: null,
+  gentle: [[0, 0], [0.25, 0.18], [0.5, 0.5], [0.75, 0.82], [1, 1]],
+  medium: [[0, 0], [0.25, 0.12], [0.5, 0.5], [0.75, 0.88], [1, 1]],
+  aggressive: [[0, 0], [0.25, 0.06], [0.5, 0.5], [0.75, 0.94], [1, 1]],
 };
 
 export default function Convert() {
@@ -47,9 +61,18 @@ export default function Convert() {
   const [name, setName] = useState("");
   const [dimPresets, setDimPresets] = useState<DimensionPreset[]>([]);
   const [presetId, setPresetId] = useState<string>("custom");
+  const [curvePreset, setCurvePreset] = useState<string>("linear");
   const [depthMode, setDepthMode] = useState<DepthMode>("ai");
   const [autoSelectedLuminance, setAutoSelectedLuminance] = useState(false);
   const [roleResolved, setRoleResolved] = useState(false);
+
+  // Honor the Settings "Default export units" toggle (defaults to inches).
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => setParams((prev) => ({ ...prev, units: s.default_units })))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.listDimensionPresets().then(setDimPresets).catch(() => {});
@@ -74,7 +97,17 @@ export default function Convert() {
         if (img?.role === "ai_relief") {
           setDepthMode("luminance");
           setAutoSelectedLuminance(true);
-          setParams((prev) => ({ ...prev, gaussian_blur_sigma: 3.5, detail: 0.3 }));
+          // Start bas-relief sources in the EasyCreate-matching configuration:
+          // edge-preserving smoothing to clean the background field and a
+          // medium S-curve to restore faces-high / background-low hierarchy.
+          setCurvePreset("medium");
+          setParams((prev) => ({
+            ...prev,
+            gaussian_blur_sigma: 3.5,
+            detail: 0.3,
+            bilateral_strength: 0.5,
+            curve_points: CURVE_PRESETS.medium,
+          }));
         }
         setRoleResolved(true);
       })
@@ -156,6 +189,45 @@ export default function Convert() {
     );
   }
 
+  // Slider for a millimetre-backed physical dimension, displayed in the chosen
+  // unit. The backend contract stays in mm; we convert only for display/entry.
+  const MM_PER_IN = 25.4;
+  function dim(
+    key: "max_depth_mm" | "base_thickness_mm",
+    label: string,
+    minMm: number,
+    maxMm: number,
+    stepMm: number
+  ) {
+    const inch = params.units === "in";
+    const f = inch ? 1 / MM_PER_IN : 1;
+    const disp = (params[key] as number) * f;
+    const step = inch ? 0.01 : stepMm;
+    return (
+      <div>
+        <label>
+          {label} ({inch ? "in" : "mm"}):{" "}
+          <b>{disp.toFixed(inch ? 2 : 1)}</b>
+        </label>
+        <input
+          type="range"
+          min={minMm * f}
+          max={maxMm * f}
+          step={step}
+          value={disp}
+          onChange={(e) =>
+            setParams({ ...params, [key]: Number(e.target.value) / f })
+          }
+        />
+      </div>
+    );
+  }
+
+  const inchUnits = params.units === "in";
+  const widthDisp = inchUnits
+    ? params.width_mm / MM_PER_IN
+    : params.width_mm;
+
   return (
     <div className="col" style={{ gap: 14 }}>
       <div className="row">
@@ -236,18 +308,47 @@ export default function Convert() {
             <label>Carve width (physical X dimension)</label>
             <input
               type="number"
-              value={params.width_mm}
-              step={1}
+              value={Number(widthDisp.toFixed(inchUnits ? 2 : 0))}
+              step={inchUnits ? 0.1 : 1}
               onChange={(e) =>
-                setParams({ ...params, width_mm: Number(e.target.value) })
+                setParams({
+                  ...params,
+                  width_mm:
+                    Number(e.target.value) * (inchUnits ? MM_PER_IN : 1),
+                })
               }
             />
-            <div className="muted">In millimetres. Height is computed from image aspect ratio.</div>
+            <div className="muted">
+              In {inchUnits ? "inches" : "millimetres"}. Height is computed from
+              image aspect ratio.
+            </div>
           </div>
-          {num("max_depth_mm", "Max carve depth (mm)", 0.5, 30, 0.1)}
-          {num("base_thickness_mm", "Base thickness (mm)", 0, 20, 0.5)}
+          {dim("max_depth_mm", "Max carve depth", 0.5, 30, 0.1)}
+          {dim("base_thickness_mm", "Base thickness", 0, 20, 0.5)}
           {num("gaussian_blur_sigma", "Smoothing (blur σ)", 0, 6, 0.1)}
+          {num("bilateral_strength", "Background smoothing (edge-preserving)", 0, 1, 0.05)}
           {num("detail", "Detail (sharpen relief)", 0, 1, 0.05)}
+          <div>
+            <label>Height curve (tonal hierarchy)</label>
+            <select
+              value={curvePreset}
+              onChange={(e) => {
+                const id = e.target.value;
+                setCurvePreset(id);
+                setParams((prev) => ({ ...prev, curve_points: CURVE_PRESETS[id] }));
+              }}
+            >
+              <option value="linear">Linear — no remap</option>
+              <option value="gentle">Gentle S — slight face pop</option>
+              <option value="medium">Medium S — recess background</option>
+              <option value="aggressive">Aggressive S — max hierarchy</option>
+            </select>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Pushes highlights (faces) up and shadows (background) down, like a
+              carved bas-relief. Pair with Background smoothing for the cleanest
+              subject-vs-field separation.
+            </div>
+          </div>
           {num("background_threshold", "Background flatten threshold", 0, 0.5, 0.01)}
           {num("target_max_dim_px", "Mesh resolution (max dim, px)", 200, 1200, 50)}
 
@@ -309,7 +410,7 @@ export default function Convert() {
           </div>
 
           <div>
-            <label>Export units</label>
+            <label>Units (inputs &amp; export)</label>
             <select
               value={params.units}
               onChange={(e) =>

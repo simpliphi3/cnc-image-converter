@@ -27,7 +27,7 @@ HF_CACHE: Path = DATA_DIR / "hf_cache"
 
 class RuntimeConfig(BaseModel):
     aspire_folder: str | None = None
-    default_units: Literal["mm", "in"] = "mm"
+    default_units: Literal["mm", "in"] = "in"
     last_used_models: list[str] = ["openai", "gemini"]
 
 
@@ -44,7 +44,7 @@ def load_runtime_config() -> RuntimeConfig:
             return RuntimeConfig.model_validate_json(CONFIG_JSON.read_text())
         except Exception:
             pass
-    cfg = RuntimeConfig(default_units=os.environ.get("CNC_DEFAULT_UNITS", "mm"))  # type: ignore[arg-type]
+    cfg = RuntimeConfig(default_units=os.environ.get("CNC_DEFAULT_UNITS", "in"))  # type: ignore[arg-type]
     env_aspire = os.environ.get("CNC_ASPIRE_FOLDER")
     if env_aspire:
         cfg.aspire_folder = env_aspire
