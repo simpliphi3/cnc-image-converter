@@ -10,7 +10,9 @@ from PIL import Image
 from backend import config
 from backend.store import db
 
-ImageRole = Literal["reference", "generated", "depth", "export", "ai_relief"]
+ImageRole = Literal[
+    "reference", "generated", "depth", "export", "ai_relief", "ai_heightmap"
+]
 
 
 def project_dir(project_id: str) -> Path:

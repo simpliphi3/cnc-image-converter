@@ -94,17 +94,20 @@ export default function Convert() {
       .then((data) => {
         if (cancelled) return;
         const img = data.images.find((i) => i.id === imageId);
-        if (img?.role === "ai_relief") {
+        if (img?.role === "ai_relief" || img?.role === "ai_heightmap") {
           setDepthMode("luminance");
           setAutoSelectedLuminance(true);
           // Start bas-relief sources in the EasyCreate-matching configuration:
           // edge-preserving smoothing to clean the background field and a
           // medium S-curve to restore faces-high / background-low hierarchy.
+          // A true height map is already shadowless and smooth, so it needs
+          // less denoise blur than a JPEG-artifacted lit render.
+          const isHeightmap = img.role === "ai_heightmap";
           setCurvePreset("medium");
           setParams((prev) => ({
             ...prev,
-            gaussian_blur_sigma: 3.5,
-            detail: 0.3,
+            gaussian_blur_sigma: isHeightmap ? 2.0 : 3.5,
+            detail: isHeightmap ? 0.25 : 0.3,
             bilateral_strength: 0.5,
             curve_points: CURVE_PRESETS.medium,
           }));

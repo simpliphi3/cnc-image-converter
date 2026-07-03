@@ -142,9 +142,13 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               <button
                 className="primary"
                 onClick={() =>
-                  navigate(`/project/${projectId}/convert/${result.id}`)
+                  navigate(
+                    `/project/${projectId}/convert/${
+                      result.heightmap_image_id ?? result.id
+                    }`
+                  )
                 }
-                title="Use this AI render as the source for the STL"
+                title="Carve from the AI height map (falls back to this render if the height map is unavailable)"
               >
                 Looks good → Convert to STL
               </button>
@@ -159,9 +163,11 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               </a>
             </div>
             <div className="muted" style={{ fontSize: 12 }}>
-              The STL is built from this exact image. Background pattern,
-              frame, and text are added in Aspire later — a step-by-step
-              companion file is generated alongside the STL.
+              This render is the customer mockup. Behind the scenes a shadowless
+              AI height map is generated alongside it, and the STL is carved from
+              that — so forward features (a neck under the chin) stand proud
+              instead of sinking. A step-by-step Aspire companion file is
+              generated alongside the STL.
             </div>
           </>
         )}

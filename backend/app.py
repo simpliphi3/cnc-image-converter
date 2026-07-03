@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from pathlib import Path
@@ -256,7 +257,7 @@ async def api_convert(body: ConvertBody) -> dict[str, Any]:
         aspire_folder=cfg.aspire_folder,
     )
     aspire_steps_export = None
-    if img.get("role") == "ai_relief":
+    if img.get("role") in ("ai_relief", "ai_heightmap"):
         notes_path = proj_dir / f".airelief_notes_{body.image_id}.json"
         notes: dict[str, Any] = {}
         if notes_path.exists():
@@ -411,24 +412,44 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
             meta = json.loads(cache_meta.read_text())
             existing = files.get_image(meta["image_id"])
             if existing:
-                return existing
+                return {**existing, "heightmap_image_id": meta.get("heightmap_image_id")}
         except Exception:
             cache_meta.unlink(missing_ok=True)
 
     src_bytes = src_path.read_bytes()
-    try:
-        png = await relief_gen.generate_relief(src_bytes, req)
-    except Exception as e:
-        log.exception("AI relief generation failed")
-        raise HTTPException(502, f"AI relief generation failed: {e}")
+    # Generate the lit render (customer mockup) and the shadowless height map
+    # (STL carve source) in parallel so total latency stays close to one call.
+    # The render is required; the height map is best-effort — if it fails we
+    # still return the render and the carve falls back to the render as before.
+    render_res, hm_res = await asyncio.gather(
+        relief_gen.generate_relief(src_bytes, req),
+        relief_gen.generate_heightmap(src_bytes, req),
+        return_exceptions=True,
+    )
+    if isinstance(render_res, BaseException):
+        log.exception("AI relief generation failed", exc_info=render_res)
+        raise HTTPException(502, f"AI relief generation failed: {render_res}")
 
     saved = files.save_image_bytes(
         project_id,
-        png,
+        render_res,
         role="ai_relief",
         model=req.provider,
         extension="png",
     )
+
+    heightmap_image_id: str | None = None
+    if isinstance(hm_res, BaseException):
+        log.warning("AI height map generation failed; carve will use render: %s", hm_res)
+    else:
+        hm_saved = files.save_image_bytes(
+            project_id,
+            hm_res,
+            role="ai_heightmap",
+            model=req.provider,
+            extension="png",
+        )
+        heightmap_image_id = hm_saved["id"]
 
     notes_payload = {
         "style": req.style,
@@ -440,14 +461,20 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
         "provider": req.provider,
         "source_image_id": body.image_id,
         "prompt": relief_gen.build_prompt(req),
+        "heightmap_image_id": heightmap_image_id,
     }
-    (cache_dir / f".airelief_notes_{saved['id']}.json").write_text(
-        json.dumps(notes_payload, indent=2)
+    notes_json = json.dumps(notes_payload, indent=2)
+    (cache_dir / f".airelief_notes_{saved['id']}.json").write_text(notes_json)
+    # Also key the notes by the height map id, since that's what the carve runs
+    # on — the Aspire companion looks them up by the converted image's id.
+    if heightmap_image_id:
+        (cache_dir / f".airelief_notes_{heightmap_image_id}.json").write_text(notes_json)
+    cache_meta.write_text(
+        json.dumps({"image_id": saved["id"], "heightmap_image_id": heightmap_image_id})
     )
-    cache_meta.write_text(json.dumps({"image_id": saved["id"]}))
 
     projects.touch_project(project_id, cover_image_id=saved["id"])
-    return saved
+    return {**saved, "heightmap_image_id": heightmap_image_id}
 
 
 # --- Mockup on wood ---

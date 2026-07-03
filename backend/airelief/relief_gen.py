@@ -99,3 +99,49 @@ async def generate_relief(image_bytes: bytes, req: AiReliefRequest) -> bytes:
     if req.provider == "openai":
         return await openai_client.generate(prompt, [image_bytes])
     return await gemini_client.generate(prompt, [image_bytes])
+
+
+def build_heightmap_prompt(req: AiReliefRequest) -> str:
+    """Prompt for a true grayscale height map, NOT a lit render.
+
+    The lit render (build_prompt) bakes in dramatic shadows that corrupt the
+    luminance->height conversion — a forward-but-shadowed neck reads dark and
+    sinks. This asks the model for a shadowless topographic height field where
+    brightness maps monotonically to elevation, so luminance IS height.
+    """
+    frame_desc = _FRAME_DESCRIPTIONS.get(req.frame, _FRAME_DESCRIPTIONS["simple"])
+    background_clause = (
+        " Behind the subject, a shallow radiating sunburst pattern in low relief, "
+        "only slightly raised above the deepest background."
+        if req.sunburst_background
+        else " Behind the subject, a smooth flat field at the lowest (darkest) level."
+    )
+    text_clause = ""
+    if req.text:
+        text_clause = (
+            f' Near the bottom, raised serif lettering reading exactly: "{req.text}", '
+            f"standing slightly proud of the background."
+        )
+    return (
+        "Convert this photograph into a smooth GRAYSCALE HEIGHT MAP (depth map) for "
+        "CNC relief carving. Encode ONLY surface elevation as brightness: pure white = "
+        "the surfaces closest to the viewer (nose, cheekbones, chin, brow, and the "
+        "front of the neck and shoulders), progressively darker grays = surfaces set "
+        "further back, black = the deepest background. Brightness must correspond "
+        "strictly and monotonically to how far each surface projects toward the "
+        "viewer, like a topographic elevation field. This is NOT a lit photograph: "
+        "absolutely NO cast shadows, NO directional lighting, NO specular highlights, "
+        "NO wood, NO grain, NO color, NO surface texture. Render every form as a "
+        "smoothly rounded, shadowless volume with soft continuous gradients so the "
+        "face and body read as gentle domes, never a flat cutout."
+        f"{background_clause}{text_clause} Composition matches {frame_desc}, with the "
+        "frame as a raised border at a single flat height. Output a clean, matte, "
+        "evenly-toned grayscale image, straight-on orthographic view."
+    )
+
+
+async def generate_heightmap(image_bytes: bytes, req: AiReliefRequest) -> bytes:
+    prompt = build_heightmap_prompt(req)
+    if req.provider == "openai":
+        return await openai_client.generate(prompt, [image_bytes])
+    return await gemini_client.generate(prompt, [image_bytes])

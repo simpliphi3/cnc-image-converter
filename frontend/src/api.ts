@@ -12,12 +12,20 @@ export type ImageRec = {
   project_id: string;
   turn_id?: string | null;
   model?: string | null;
-  role: "reference" | "generated" | "depth" | "export" | "ai_relief";
+  role:
+    | "reference"
+    | "generated"
+    | "depth"
+    | "export"
+    | "ai_relief"
+    | "ai_heightmap";
   filename: string;
   width?: number | null;
   height?: number | null;
   error?: string | null;
   created_at: number;
+  // Present on an ai_relief render: the linked shadowless height map to carve from.
+  heightmap_image_id?: string | null;
 };
 
 export type AiReliefRequest = {
