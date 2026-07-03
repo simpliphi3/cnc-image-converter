@@ -8,6 +8,7 @@ type Params = {
   base_thickness_mm: number;
   width_mm: number;
   gaussian_blur_sigma: number;
+  detail: number;
   background_threshold: number;
   invert: boolean;
   target_max_dim_px: number;
@@ -21,6 +22,7 @@ const DEFAULTS: Params = {
   base_thickness_mm: 3.0,
   width_mm: 150.0,
   gaussian_blur_sigma: 1.5,
+  detail: 0.0,
   background_threshold: 0.0,
   invert: false,
   target_max_dim_px: 600,
@@ -72,7 +74,7 @@ export default function Convert() {
         if (img?.role === "ai_relief") {
           setDepthMode("luminance");
           setAutoSelectedLuminance(true);
-          setParams((prev) => ({ ...prev, gaussian_blur_sigma: 3.5 }));
+          setParams((prev) => ({ ...prev, gaussian_blur_sigma: 3.5, detail: 0.3 }));
         }
         setRoleResolved(true);
       })
@@ -239,6 +241,7 @@ export default function Convert() {
           {num("max_depth_mm", "Max carve depth (mm)", 0.5, 30, 0.1)}
           {num("base_thickness_mm", "Base thickness (mm)", 0, 20, 0.5)}
           {num("gaussian_blur_sigma", "Smoothing (blur σ)", 0, 6, 0.1)}
+          {num("detail", "Detail (sharpen relief)", 0, 1, 0.05)}
           {num("background_threshold", "Background flatten threshold", 0, 0.5, 0.01)}
           {num("target_max_dim_px", "Mesh resolution (max dim, px)", 200, 1200, 50)}
 

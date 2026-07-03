@@ -11,6 +11,9 @@ from scipy.ndimage import gaussian_filter, zoom
 
 Units = Literal["mm", "in"]
 
+_DETAIL_RADIUS_PX = 2.0  # blur radius for the unsharp-mask high-pass
+_DETAIL_MAX_GAIN = 1.5   # sharpening applied at detail = 1.0
+
 
 @dataclass
 class StlParams:
@@ -18,6 +21,7 @@ class StlParams:
     base_thickness_mm: float = 3.0
     width_mm: float = 150.0           # physical width of the carved area
     gaussian_blur_sigma: float = 1.5  # smooths noisy depth maps
+    detail: float = 0.0               # 0..1 unsharp strength; re-emphasizes fine relief
     background_threshold: float = 0.0  # values <= this are flattened to 0
     invert: bool = False              # set True if dark = high looks better
     target_max_dim_px: int = 600      # downsample heightmap before meshing
@@ -51,6 +55,14 @@ def _process_depth(depth01: np.ndarray, p: StlParams) -> np.ndarray:
         d = 1.0 - d
     if p.gaussian_blur_sigma and p.gaussian_blur_sigma > 0:
         d = gaussian_filter(d, sigma=float(p.gaussian_blur_sigma))
+    if p.detail and p.detail > 0:
+        # Unsharp mask: re-emphasize genuine relief after the denoise blur.
+        # final = d + k*A*(d - blur(d)) is algebraically the raw/enhanced
+        # crossfade with k = p.detail; clip tames overshoot so a single hot
+        # pixel can't compress the whole map when we normalize below.
+        blurred = gaussian_filter(d, sigma=_DETAIL_RADIUS_PX)
+        d = d + (float(p.detail) * _DETAIL_MAX_GAIN) * (d - blurred)
+        d = np.clip(d, 0.0, 1.0)
     if p.background_threshold > 0:
         d = np.where(d <= p.background_threshold, 0.0, d)
     d = d - d.min()
@@ -67,6 +79,13 @@ def _build_mesh(depth01: np.ndarray, p: StlParams) -> trimesh.Trimesh:
     Coordinate frame: X right, Y up, Z out of the board (toward the viewer).
     Z = 0 is the back of the board; Z = base_thickness + max_depth is the highest point.
     """
+    # Image row 0 is the TOP of the picture, but our Y axis points up (row r ->
+    # y increasing), so a raw mapping lands the top of the image at the bottom
+    # of the board — a vertical mirror. Flip rows here (not by reversing the Y
+    # coords, which would invert the face winding / normals) so the relief comes
+    # out oriented like the source. Applied only in the mesh; the exported depth
+    # PNG keeps source row order for Aspire's Component-from-Bitmap importer.
+    depth01 = np.flipud(depth01)
     h, w = depth01.shape
     aspect = h / w
     width_mm = p.width_mm
