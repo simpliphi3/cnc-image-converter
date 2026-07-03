@@ -17,6 +17,29 @@ _pipeline = None
 _pipeline_lock = threading.Lock()
 _device_info: dict[str, Any] = {"device": "unknown", "model": None, "loaded": False}
 
+# Depth sources arrive 8-bit quantized (luminance from an 8-bit image; the AI
+# pipeline's PIL depth is 0..255). On smooth, gently-sloped regions — a portrait's
+# cheeks, forehead, background — the equal-valued plateaus are wider than any
+# sane blur kernel, so smoothing alone can't remove the resulting contour bands
+# (measured: blur sigma=3.5 leaves every terrace on a gentle gradient). Adding
+# sub-LSB dither breaks the plateaus so the downstream blur reconstructs a
+# continuous ramp. Amplitude is +-0.5 of one 8-bit step (~1/510 of full depth,
+# well under CNC resolution). Fixed seed keeps exports reproducible.
+_DEBAND_STEP = 1.0 / 255.0
+
+
+def _deband_8bit(arr01: np.ndarray) -> np.ndarray:
+    """Dither a [0,1] map by +-0.5 LSB to break 8-bit contour plateaus.
+
+    A fresh seeded RNG per call makes the dither deterministic, so converting
+    the same image twice yields byte-identical output.
+    """
+    rng = np.random.default_rng(0)
+    noise = rng.uniform(
+        -0.5 * _DEBAND_STEP, 0.5 * _DEBAND_STEP, size=arr01.shape
+    ).astype(np.float32)
+    return arr01 + noise
+
 
 def device_info() -> dict[str, Any]:
     return dict(_device_info)
@@ -49,7 +72,8 @@ def _estimate_sync(image_bytes: bytes) -> np.ndarray:
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     out = pipe(img)
     depth = out["depth"]
-    if isinstance(depth, Image.Image):
+    quantized = isinstance(depth, Image.Image)  # PIL depth is 0..255; tensor is continuous
+    if quantized:
         arr = np.array(depth).astype(np.float32)
     else:
         arr = np.asarray(depth, dtype=np.float32)
@@ -57,6 +81,8 @@ def _estimate_sync(image_bytes: bytes) -> np.ndarray:
     m = arr.max()
     if m > 0:
         arr = arr / m
+    if quantized:
+        arr = _deband_8bit(arr)  # only the 8-bit PIL path needs plateau-breaking dither
     return arr
 
 
@@ -74,6 +100,7 @@ def luminance_from_image_sync(image_bytes: bytes, smoothing: float = 1.5) -> np.
     """
     img = Image.open(io.BytesIO(image_bytes)).convert("L")
     arr = np.array(img, dtype=np.float32) / 255.0
+    arr = _deband_8bit(arr)  # break 8-bit plateaus before smoothing reconstructs the ramp
     if smoothing > 0:
         arr = gaussian_filter(arr, sigma=float(smoothing))
     arr = arr - arr.min()

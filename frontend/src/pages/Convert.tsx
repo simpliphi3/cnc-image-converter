@@ -167,7 +167,13 @@ export default function Convert() {
         <div className="preview">
           <div className="muted">Source image</div>
           {imageId && <img src={api.imageUrl(imageId)} alt="source" />}
-          <div className="muted">AI depth map (Depth Anything V2)</div>
+          <div className="muted">
+            {depthMode === "luminance"
+              ? "Depth preview — luminance heightmap (bright = high)"
+              : depthMode === "hybrid"
+              ? "Depth preview — hybrid (AI silhouette × luminance)"
+              : "Depth preview — AI depth (Depth Anything V2)"}
+          </div>
           {depthLoading ? (
             <div className="muted">
               <span className="spinner" /> Estimating depth…

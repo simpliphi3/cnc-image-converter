@@ -182,7 +182,9 @@ async def _depth_for_image(
     if not img:
         raise HTTPException(404, "image not found")
     project_id = img["project_id"]
-    cache = files.project_dir(project_id) / f".depth_{mode}_{image_id}.npy"
+    # v2: depth pipeline now dithers 8-bit sources to break contour terracing.
+    # The version tag invalidates pre-dither caches so the fix takes effect.
+    cache = files.project_dir(project_id) / f".depth_v2_{mode}_{image_id}.npy"
     if cache.exists():
         try:
             return np.load(cache), img
