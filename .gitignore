@@ -16,6 +16,8 @@ node_modules/
 frontend/.next/
 frontend/out/
 frontend/.turbo/
+frontend/dist/
+*.tsbuildinfo
 
 # Model cache / data
 .hf_cache/
