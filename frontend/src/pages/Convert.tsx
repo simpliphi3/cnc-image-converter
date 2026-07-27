@@ -65,6 +65,12 @@ export default function Convert() {
   const [depthMode, setDepthMode] = useState<DepthMode>("ai");
   const [autoSelectedLuminance, setAutoSelectedLuminance] = useState(false);
   const [roleResolved, setRoleResolved] = useState(false);
+  // What kind of AI relief source we're carving from + the sibling image id
+  // (if any), so we can offer a "Switch to full mockup / subject only" link.
+  const [sourceRole, setSourceRole] = useState<
+    "ai_relief" | "ai_heightmap" | null
+  >(null);
+  const [pairedImageId, setPairedImageId] = useState<string | null>(null);
 
   // Honor the Settings "Default export units" toggle (defaults to inches).
   useEffect(() => {
@@ -97,6 +103,8 @@ export default function Convert() {
         if (img?.role === "ai_relief" || img?.role === "ai_heightmap") {
           setDepthMode("luminance");
           setAutoSelectedLuminance(true);
+          setSourceRole(img.role);
+          setPairedImageId(img.paired_image_id ?? null);
           // Start bas-relief sources in the EasyCreate-matching configuration:
           // edge-preserving smoothing to clean the background field and a
           // medium S-curve to restore faces-high / background-low hierarchy.
@@ -111,6 +119,9 @@ export default function Convert() {
             bilateral_strength: 0.5,
             curve_points: CURVE_PRESETS.medium,
           }));
+        } else {
+          setSourceRole(null);
+          setPairedImageId(null);
         }
         setRoleResolved(true);
       })
@@ -237,6 +248,47 @@ export default function Convert() {
         <button onClick={() => navigate(`/project/${projectId}`)}>← Back</button>
         <h2 style={{ margin: 0, fontSize: 18 }}>Convert to STL</h2>
       </div>
+
+      {sourceRole && (
+        <div
+          className="card"
+          style={{
+            padding: "10px 14px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 13 }}>
+            <b>
+              {sourceRole === "ai_relief"
+                ? "Carving full mockup"
+                : "Carving subject only"}
+            </b>
+            <span className="muted" style={{ marginLeft: 8 }}>
+              {sourceRole === "ai_relief"
+                ? "— frame, sunburst, and any caption are baked into the STL"
+                : "— add frame + sunburst + text in Aspire per the companion file"}
+            </span>
+          </div>
+          {pairedImageId && (
+            <button
+              onClick={() =>
+                navigate(`/project/${projectId}/convert/${pairedImageId}`)
+              }
+              title={
+                sourceRole === "ai_relief"
+                  ? "Switch to the shadowless height map (subject-only carve)"
+                  : "Switch to the full lit mockup (everything carved into the STL)"
+              }
+            >
+              Switch to{" "}
+              {sourceRole === "ai_relief" ? "subject only" : "full mockup"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="split">
         <div className="preview">

@@ -26,6 +26,9 @@ export type ImageRec = {
   created_at: number;
   // Present on an ai_relief render: the linked shadowless height map to carve from.
   heightmap_image_id?: string | null;
+  // Bidirectional pointer for ai_relief ↔ ai_heightmap so the Convert page
+  // can offer a Switch link between the two carve modes.
+  paired_image_id?: string | null;
 };
 
 export type AiReliefRequest = {

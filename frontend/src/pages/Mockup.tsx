@@ -142,16 +142,24 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               <button
                 className="primary"
                 onClick={() =>
-                  navigate(
-                    `/project/${projectId}/convert/${
-                      result.heightmap_image_id ?? result.id
-                    }`
-                  )
+                  navigate(`/project/${projectId}/convert/${result.id}`)
                 }
-                title="Carve from the AI height map (falls back to this render if the height map is unavailable)"
+                title="Carve the full mockup as-shown, including frame and sunburst"
               >
-                Looks good → Convert to STL
+                Convert full mockup → STL
               </button>
+              {result.heightmap_image_id && (
+                <button
+                  onClick={() =>
+                    navigate(
+                      `/project/${projectId}/convert/${result.heightmap_image_id}`
+                    )
+                  }
+                  title="Carve only the subject; add frame and background in Aspire"
+                >
+                  Subject only (frame in Aspire)
+                </button>
+              )}
               <button onClick={onGenerate} disabled={loading}>
                 Regenerate
               </button>
@@ -163,11 +171,11 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               </a>
             </div>
             <div className="muted" style={{ fontSize: 12 }}>
-              This render is the customer mockup. Behind the scenes a shadowless
-              AI height map is generated alongside it, and the STL is carved from
-              that — so forward features (a neck under the chin) stand proud
-              instead of sinking. A step-by-step Aspire companion file is
-              generated alongside the STL.
+              <b>Full mockup</b> carves everything you see (frame, sunburst,
+              caption) into the STL — no post-processing needed.{" "}
+              <b>Subject only</b> carves just the subject on a plain field so
+              you can add frame + sunburst + text in Aspire with dedicated
+              toolpaths (cleaner but more work). Both use this same render.
             </div>
           </>
         )}

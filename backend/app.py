@@ -92,15 +92,37 @@ def api_create_project(body: ProjectCreate) -> dict[str, Any]:
     return projects.create_project(body.name.strip())
 
 
+def _enrich_pair_ids(project_id: str, images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach paired_image_id to ai_relief / ai_heightmap images by reading the
+    per-image notes sidecar so the frontend can offer a 'Switch' link."""
+    if not images:
+        return images
+    proj_dir = files.project_dir(project_id)
+    out: list[dict[str, Any]] = []
+    for img in images:
+        if img.get("role") in ("ai_relief", "ai_heightmap"):
+            sidecar = proj_dir / f".airelief_notes_{img['id']}.json"
+            paired = None
+            if sidecar.exists():
+                try:
+                    paired = json.loads(sidecar.read_text()).get("paired_image_id")
+                except Exception:
+                    paired = None
+            img = {**img, "paired_image_id": paired}
+        out.append(img)
+    return out
+
+
 @app.get("/api/projects/{project_id}")
 def api_get_project(project_id: str) -> dict[str, Any]:
     p = projects.get_project(project_id)
     if not p:
         raise HTTPException(404, "project not found")
+    imgs = files.list_project_images(project_id)
     return {
         "project": p,
         "turns": projects.list_turns(project_id),
-        "images": files.list_project_images(project_id),
+        "images": _enrich_pair_ids(project_id, imgs),
         "exports": projects.list_exports(project_id),
     }
 
@@ -265,6 +287,11 @@ async def api_convert(body: ConvertBody) -> dict[str, Any]:
                 notes = json.loads(notes_path.read_text())
             except Exception:
                 pass
+        # ai_heightmap = shadowless subject-only source → companion tells the
+        # user to add frame/sunburst/text in Aspire.
+        # ai_relief    = full lit mockup source → companion says everything is
+        # already carved into the STL, don't double-add.
+        subject_only = img.get("role") == "ai_heightmap"
         md_path = proj_dir / f"{base}_aspire_steps.md"
         aspire_companion.write_steps(
             md_path,
@@ -274,6 +301,7 @@ async def api_convert(body: ConvertBody) -> dict[str, Any]:
             has_sunburst=bool(notes.get("sunburst_background", True)),
             has_frame=(notes.get("frame", "simple") != "none"),
             text=notes.get("text", ""),
+            subject_only=subject_only,
         )
         aspire_steps_export = files.record_export(
             project_id,
@@ -412,7 +440,12 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
             meta = json.loads(cache_meta.read_text())
             existing = files.get_image(meta["image_id"])
             if existing:
-                return {**existing, "heightmap_image_id": meta.get("heightmap_image_id")}
+                hm_id = meta.get("heightmap_image_id")
+                return {
+                    **existing,
+                    "heightmap_image_id": hm_id,
+                    "paired_image_id": hm_id,
+                }
         except Exception:
             cache_meta.unlink(missing_ok=True)
 
@@ -451,7 +484,8 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
         )
         heightmap_image_id = hm_saved["id"]
 
-    notes_payload = {
+    # Base notes shared by both sidecars.
+    base_notes = {
         "style": req.style,
         "palette": req.palette,
         "frame": req.frame,
@@ -463,12 +497,19 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
         "prompt": relief_gen.build_prompt(req),
         "heightmap_image_id": heightmap_image_id,
     }
-    notes_json = json.dumps(notes_payload, indent=2)
-    (cache_dir / f".airelief_notes_{saved['id']}.json").write_text(notes_json)
-    # Also key the notes by the height map id, since that's what the carve runs
-    # on — the Aspire companion looks them up by the converted image's id.
+    # Sidecar for the lit-render (ai_relief) image — paired_image_id points at
+    # the shadowless heightmap so the Convert page can offer a Switch link.
+    relief_notes = {**base_notes, "paired_image_id": heightmap_image_id}
+    (cache_dir / f".airelief_notes_{saved['id']}.json").write_text(
+        json.dumps(relief_notes, indent=2)
+    )
+    # And the mirror sidecar for the heightmap — paired_image_id points back
+    # at the lit render.
     if heightmap_image_id:
-        (cache_dir / f".airelief_notes_{heightmap_image_id}.json").write_text(notes_json)
+        hm_notes = {**base_notes, "paired_image_id": saved["id"]}
+        (cache_dir / f".airelief_notes_{heightmap_image_id}.json").write_text(
+            json.dumps(hm_notes, indent=2)
+        )
     cache_meta.write_text(
         json.dumps({"image_id": saved["id"], "heightmap_image_id": heightmap_image_id})
     )
