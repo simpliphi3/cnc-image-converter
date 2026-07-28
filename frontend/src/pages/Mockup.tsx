@@ -129,8 +129,8 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
         <div className="muted">AI bas-relief render</div>
         {loading && (
           <div className="muted">
-            <span className="spinner" /> Generating (takes 10–30 s depending on
-            provider)…
+            <span className="spinner" /> Generating — two chained steps (mockup
+            render, then its height map), typically 30–60 s total…
           </div>
         )}
         {err && <div className="error">{err}</div>}
@@ -142,22 +142,24 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               <button
                 className="primary"
                 onClick={() =>
-                  navigate(`/project/${projectId}/convert/${result.id}`)
+                  navigate(
+                    `/project/${projectId}/convert/${
+                      result.heightmap_image_id ?? result.id
+                    }`
+                  )
                 }
-                title="Carve the full mockup as-shown, including frame and sunburst"
+                title="Carve from the height map derived from this exact render — full composition with correct elevations"
               >
-                Convert full mockup → STL
+                Looks good → Convert to STL
               </button>
               {result.heightmap_image_id && (
                 <button
                   onClick={() =>
-                    navigate(
-                      `/project/${projectId}/convert/${result.heightmap_image_id}`
-                    )
+                    navigate(`/project/${projectId}/convert/${result.id}`)
                   }
-                  title="Carve only the subject; add frame and background in Aspire"
+                  title="Advanced: carve straight from this lit render's luminance. Wood tone and shading become height — dark-stained areas carve low."
                 >
-                  Subject only (frame in Aspire)
+                  Carve lit render directly (advanced)
                 </button>
               )}
               <button onClick={onGenerate} disabled={loading}>
@@ -171,11 +173,12 @@ function AiPanel({ projectId, imageId }: { projectId: string; imageId: string })
               </a>
             </div>
             <div className="muted" style={{ fontSize: 12 }}>
-              <b>Full mockup</b> carves everything you see (frame, sunburst,
-              caption) into the STL — no post-processing needed.{" "}
-              <b>Subject only</b> carves just the subject on a plain field so
-              you can add frame + sunburst + text in Aspire with dedicated
-              toolpaths (cleaner but more work). Both use this same render.
+              The STL carves from a shadowless height map converted from this
+              exact render — same frame, sunburst, and caption, but with
+              brightness meaning <i>elevation</i> instead of wood tone, so the
+              subject stands proud of its surroundings. The advanced button
+              instead uses the render's raw luminance (occasionally better for
+              flat line-art styles; usually worse for stained-wood scenes).
             </div>
           </>
         )}

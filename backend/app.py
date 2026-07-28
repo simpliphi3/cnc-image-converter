@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 from pathlib import Path
@@ -287,11 +286,12 @@ async def api_convert(body: ConvertBody) -> dict[str, Any]:
                 notes = json.loads(notes_path.read_text())
             except Exception:
                 pass
-        # ai_heightmap = shadowless subject-only source → companion tells the
-        # user to add frame/sunburst/text in Aspire.
-        # ai_relief    = full lit mockup source → companion says everything is
-        # already carved into the STL, don't double-add.
-        subject_only = img.get("role") == "ai_heightmap"
+        # The height map is now chained from the lit render, so BOTH roles
+        # carry the full approved composition — frame, sunburst, caption are
+        # in the mesh either way. Companion always uses the "already included,
+        # don't double-add" flavor. (subject_only=True writer retained for a
+        # future explicit isolate-subject feature.)
+        subject_only = False
         md_path = proj_dir / f"{base}_aspire_steps.md"
         aspire_companion.write_steps(
             md_path,
@@ -450,39 +450,40 @@ async def api_airelief(body: AiReliefBody) -> dict[str, Any]:
             cache_meta.unlink(missing_ok=True)
 
     src_bytes = src_path.read_bytes()
-    # Generate the lit render (customer mockup) and the shadowless height map
-    # (STL carve source) in parallel so total latency stays close to one call.
-    # The render is required; the height map is best-effort — if it fails we
-    # still return the render and the carve falls back to the render as before.
-    render_res, hm_res = await asyncio.gather(
-        relief_gen.generate_relief(src_bytes, req),
-        relief_gen.generate_heightmap(src_bytes, req),
-        return_exceptions=True,
-    )
-    if isinstance(render_res, BaseException):
-        log.exception("AI relief generation failed", exc_info=render_res)
-        raise HTTPException(502, f"AI relief generation failed: {render_res}")
+    # CHAINED generation: lit render first, then convert THAT RENDER into a
+    # shadowless height map. Chaining (vs the old parallel-from-photo flow)
+    # is what keeps the carve source pixel-faithful to the mockup the user
+    # approves — frame, sunburst, and caption survive, and elevation semantics
+    # are correct (a dark-stained subject no longer sinks below pale pillows
+    # the way raw render luminance did). Costs sequential latency (~2x one
+    # call); the render is required, the height map stays best-effort.
+    try:
+        render_png = await relief_gen.generate_relief(src_bytes, req)
+    except Exception as e:
+        log.exception("AI relief generation failed")
+        raise HTTPException(502, f"AI relief generation failed: {e}")
 
     saved = files.save_image_bytes(
         project_id,
-        render_res,
+        render_png,
         role="ai_relief",
         model=req.provider,
         extension="png",
     )
 
     heightmap_image_id: str | None = None
-    if isinstance(hm_res, BaseException):
-        log.warning("AI height map generation failed; carve will use render: %s", hm_res)
-    else:
+    try:
+        hm_png = await relief_gen.generate_heightmap(render_png, req)
         hm_saved = files.save_image_bytes(
             project_id,
-            hm_res,
+            hm_png,
             role="ai_heightmap",
             model=req.provider,
             extension="png",
         )
         heightmap_image_id = hm_saved["id"]
+    except Exception as e:
+        log.warning("AI height map conversion failed; carve will use render: %s", e)
 
     # Base notes shared by both sidecars.
     base_notes = {

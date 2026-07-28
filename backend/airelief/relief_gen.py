@@ -86,11 +86,17 @@ def build_prompt(req: AiReliefRequest) -> str:
 
 
 def cache_key(image_id: str, req: AiReliefRequest) -> str:
-    """Stable hash so identical requests reuse the same cached render."""
+    """Stable hash so identical requests reuse the same cached render.
+
+    Hashes BOTH prompts: a change to either the render prompt or the
+    heightmap-conversion prompt must invalidate the cached pair, since the
+    heightmap is chained from the render.
+    """
     h = hashlib.sha256()
     h.update(image_id.encode())
     h.update(req.provider.encode())
     h.update(build_prompt(req).encode())
+    h.update(build_heightmap_prompt(req).encode())
     return h.hexdigest()[:16]
 
 
@@ -102,46 +108,47 @@ async def generate_relief(image_bytes: bytes, req: AiReliefRequest) -> bytes:
 
 
 def build_heightmap_prompt(req: AiReliefRequest) -> str:
-    """Prompt for a true grayscale height map, NOT a lit render.
+    """Prompt to convert the LIT RENDER into a grayscale height map.
 
-    The lit render (build_prompt) bakes in dramatic shadows that corrupt the
-    luminance->height conversion — a forward-but-shadowed neck reads dark and
-    sinks. This asks the model for a shadowless topographic height field where
-    brightness maps monotonically to elevation, so luminance IS height.
+    The input image for this call is the carving render itself (not the source
+    photo), so the model's job is a faithful re-encoding, not a re-imagining:
+    reproduce the exact composition, but express elevation as brightness
+    instead of lit wood. This is what keeps 'what you approved' and 'what
+    carves' aligned — chaining from the render means the frame, sunburst, and
+    caption the user saw all survive into the carve source, with correct
+    height semantics (a dark-stained subject no longer sinks below pale
+    pillows the way raw render luminance made it).
     """
-    frame_desc = _FRAME_DESCRIPTIONS.get(req.frame, _FRAME_DESCRIPTIONS["simple"])
-    background_clause = (
-        " Behind the subject, a shallow radiating sunburst pattern in low relief, "
-        "only slightly raised above the deepest background."
-        if req.sunburst_background
-        else " Behind the subject, a smooth flat field at the lowest (darkest) level."
-    )
-    text_clause = ""
-    if req.text:
-        text_clause = (
-            f' Near the bottom, raised serif lettering reading exactly: "{req.text}", '
-            f"standing slightly proud of the background."
-        )
     return (
-        "Convert this photograph into a smooth GRAYSCALE HEIGHT MAP (depth map) for "
-        "CNC relief carving. Encode ONLY surface elevation as brightness: pure white = "
-        "the surfaces closest to the viewer (nose, cheekbones, chin, brow, and the "
-        "front of the neck and shoulders), progressively darker grays = surfaces set "
-        "further back, black = the deepest background. Brightness must correspond "
-        "strictly and monotonically to how far each surface projects toward the "
-        "viewer, like a topographic elevation field. This is NOT a lit photograph: "
-        "absolutely NO cast shadows, NO directional lighting, NO specular highlights, "
-        "NO wood, NO grain, NO color, NO surface texture. Render every form as a "
-        "smoothly rounded, shadowless volume with soft continuous gradients so the "
-        "face and body read as gentle domes, never a flat cutout."
-        f"{background_clause}{text_clause} Composition matches {frame_desc}, with the "
-        "frame as a raised border at a single flat height. Output a clean, matte, "
-        "evenly-toned grayscale image, straight-on orthographic view."
+        "This image shows a finished CNC wood relief carving. Convert it into the "
+        "GRAYSCALE HEIGHT MAP (depth map) that would carve this exact piece. "
+        "CRITICAL: reproduce THIS image's composition, layout, and every element "
+        "exactly — same frame, same background pattern, same subject pose and "
+        "position, same lettering if present. Do not add, remove, move, or "
+        "restyle anything. Encode ONLY surface elevation as brightness: pure "
+        "white = the highest surfaces (the parts of the carving that project "
+        "furthest toward the viewer — the main subject's nearest forms), "
+        "progressively darker grays = surfaces set further back, black = the "
+        "deepest recesses. Ignore the wood's color and staining entirely: a "
+        "dark-stained area that projects forward must be BRIGHT, because "
+        "brightness means elevation, not tone. Remove all lighting: NO cast "
+        "shadows, NO directional shading, NO specular highlights, NO wood grain "
+        "or color. The main subject must read as the proudest (brightest) "
+        "element, standing clearly above pillows, bedding, or backdrop elements "
+        "around it. Preserve fine relief texture — fur strands, fabric weave, "
+        "wrinkles, feather lines — as subtle shallow brightness modulation on "
+        "top of each form's base elevation rather than smoothing it away. "
+        "A raised frame border sits at one consistent mid-high level; a "
+        "background pattern (e.g. sunburst rays) stays in low relief just above "
+        "the deepest background. Output a clean, matte grayscale image, "
+        "straight-on orthographic view."
     )
 
 
-async def generate_heightmap(image_bytes: bytes, req: AiReliefRequest) -> bytes:
+async def generate_heightmap(render_bytes: bytes, req: AiReliefRequest) -> bytes:
+    """Convert the lit render into a height map. ``render_bytes`` must be the
+    output of :func:`generate_relief`, not the original source photo."""
     prompt = build_heightmap_prompt(req)
     if req.provider == "openai":
-        return await openai_client.generate(prompt, [image_bytes])
-    return await gemini_client.generate(prompt, [image_bytes])
+        return await openai_client.generate(prompt, [render_bytes])
+    return await gemini_client.generate(prompt, [render_bytes])

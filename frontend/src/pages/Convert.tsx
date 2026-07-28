@@ -269,14 +269,14 @@ export default function Convert() {
         >
           <div style={{ fontSize: 13 }}>
             <b>
-              {sourceRole === "ai_relief"
-                ? "Carving full mockup"
-                : "Carving subject only"}
+              {sourceRole === "ai_heightmap"
+                ? "Carving the height map (recommended)"
+                : "Carving the lit render directly (advanced)"}
             </b>
             <span className="muted" style={{ marginLeft: 8 }}>
-              {sourceRole === "ai_relief"
-                ? "— frame, sunburst, and any caption are baked into the STL"
-                : "— add frame + sunburst + text in Aspire per the companion file"}
+              {sourceRole === "ai_heightmap"
+                ? "— converted from the approved mockup; brightness = elevation, full composition included"
+                : "— raw render luminance as height; wood tone and shading distort elevations"}
             </span>
           </div>
           {pairedImageId && (
@@ -285,13 +285,15 @@ export default function Convert() {
                 navigate(`/project/${projectId}/convert/${pairedImageId}`)
               }
               title={
-                sourceRole === "ai_relief"
-                  ? "Switch to the shadowless height map (subject-only carve)"
-                  : "Switch to the full lit mockup (everything carved into the STL)"
+                sourceRole === "ai_heightmap"
+                  ? "Switch to carving the lit render's raw luminance (advanced)"
+                  : "Switch to the height map converted from this render (recommended)"
               }
             >
               Switch to{" "}
-              {sourceRole === "ai_relief" ? "subject only" : "full mockup"}
+              {sourceRole === "ai_heightmap"
+                ? "lit render (advanced)"
+                : "height map (recommended)"}
             </button>
           )}
         </div>
