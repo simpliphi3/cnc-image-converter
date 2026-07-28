@@ -166,27 +166,43 @@ def _build_mesh(depth01: np.ndarray, p: StlParams) -> trimesh.Trimesh:
     vertices = top_verts
 
     if p.close_bottom or p.include_skirt:
-        bottom_xv = xv.copy()
-        bottom_yv = yv.copy()
-        bottom_z = np.zeros_like(top_z)
-        bot_verts = np.stack(
-            [bottom_xv, bottom_yv, bottom_z.astype(np.float32)], axis=-1
-        ).reshape(-1, 3)
+        # The bottom is a flat plane, so it only needs its PERIMETER vertices —
+        # a full grid would double the mesh for zero geometric information.
+        # Walk the rectangle perimeter counter-clockwise (viewed from above),
+        # create one z=0 vertex per perimeter grid point, then fan-triangulate.
+        # The fan shares every perimeter edge with the skirt, so the mesh stays
+        # topologically watertight (no T-vertices).
+        perim_rc: list[tuple[int, int]] = []
+        for c in range(w):                    # top row, left → right
+            perim_rc.append((0, c))
+        for r in range(1, h):                 # right column, top → bottom
+            perim_rc.append((r, w - 1))
+        for c in range(w - 2, -1, -1):        # bottom row, right → left
+            perim_rc.append((h - 1, c))
+        for r in range(h - 2, 0, -1):         # left column, bottom → top
+            perim_rc.append((r, 0))
+
         bot_offset = len(vertices)
+        perim_index: dict[tuple[int, int], int] = {
+            rc: bot_offset + i for i, rc in enumerate(perim_rc)
+        }
+        bot_verts = np.array(
+            [[xs[c], ys[r], 0.0] for (r, c) in perim_rc], dtype=np.float32
+        )
         vertices = np.concatenate([vertices, bot_verts], axis=0)
 
         def bidx(r: int, c: int) -> int:
-            return bot_offset + r * w + c
+            return perim_index[(r, c)]
 
         if p.close_bottom:
-            for r in range(h - 1):
-                for c in range(w - 1):
-                    a = bidx(r, c)
-                    b = bidx(r, c + 1)
-                    cc = bidx(r + 1, c)
-                    d = bidx(r + 1, c + 1)
-                    faces.append([a, d, b])
-                    faces.append([a, cc, d])
+            # Fan from the first perimeter vertex. Rectangle is convex, so the
+            # fan is valid. The perimeter walk above is counter-clockwise seen
+            # from +Z, so [v0, i+1, i] gives downward (-Z) normals — outward
+            # for the bottom face.
+            v0 = bot_offset
+            n = len(perim_rc)
+            for i in range(1, n - 1):
+                faces.append([v0, v0 + i + 1, v0 + i])
 
         if p.include_skirt:
             for c in range(w - 1):

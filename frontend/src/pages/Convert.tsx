@@ -108,16 +108,23 @@ export default function Convert() {
           // Start bas-relief sources in the EasyCreate-matching configuration:
           // edge-preserving smoothing to clean the background field and a
           // medium S-curve to restore faces-high / background-low hierarchy.
-          // A true height map is already shadowless and smooth, so it needs
-          // less denoise blur than a JPEG-artifacted lit render.
+          //
+          // Denoise tuning (measured, frequency-chart experiment): the source
+          // is downsampled to mesh resolution BEFORE these run, and that
+          // downsample already averages out most JPEG DCT blocking — sigma 0.8
+          // suppresses artifacts as well as 3.5 did, while retaining ~130% of
+          // 8px fur/fabric detail vs ~53% under the old defaults. Mesh
+          // resolution 800px (the flat bottom is now a perimeter fan, so this
+          // still yields fewer triangles than 600px did before).
           const isHeightmap = img.role === "ai_heightmap";
           setCurvePreset("medium");
           setParams((prev) => ({
             ...prev,
-            gaussian_blur_sigma: isHeightmap ? 2.0 : 3.5,
-            detail: isHeightmap ? 0.25 : 0.3,
-            bilateral_strength: 0.5,
+            gaussian_blur_sigma: isHeightmap ? 0.8 : 1.0,
+            detail: isHeightmap ? 0.35 : 0.4,
+            bilateral_strength: isHeightmap ? 0.3 : 0.35,
             curve_points: CURVE_PRESETS.medium,
+            target_max_dim_px: 800,
           }));
         } else {
           setSourceRole(null);
