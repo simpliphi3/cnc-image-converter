@@ -90,17 +90,22 @@ async def estimate(image_bytes: bytes) -> np.ndarray:
     return await asyncio.to_thread(_estimate_sync, image_bytes)
 
 
-def luminance_from_image_sync(image_bytes: bytes, smoothing: float = 1.5) -> np.ndarray:
+def luminance_from_image_sync(image_bytes: bytes, smoothing: float = 0.0) -> np.ndarray:
     """Use image luminance directly as depth.
 
     For stylized bas-relief images (especially AI-generated portraits), the
     carved-relief detail is encoded in the photo's lighting and tonal values,
     not in real 3D structure. Monocular depth models will collapse a portrait
     to a uniform silhouette; luminance preserves every facial feature.
+
+    No smoothing by default: this extraction must deliver the source's full
+    sharpness. All user-visible smoothing lives in the STL params (blur /
+    bilateral sliders) so the Convert page's controls tell the whole truth —
+    a hidden blur here meant "sliders at zero" still exported a softened mesh.
     """
     img = Image.open(io.BytesIO(image_bytes)).convert("L")
     arr = np.array(img, dtype=np.float32) / 255.0
-    arr = _deband_8bit(arr)  # break 8-bit plateaus before smoothing reconstructs the ramp
+    arr = _deband_8bit(arr)  # break 8-bit plateaus; reconstructs a ramp if blur is applied later
     if smoothing > 0:
         arr = gaussian_filter(arr, sigma=float(smoothing))
     arr = arr - arr.min()
@@ -110,7 +115,7 @@ def luminance_from_image_sync(image_bytes: bytes, smoothing: float = 1.5) -> np.
     return arr
 
 
-async def luminance_from_image(image_bytes: bytes, smoothing: float = 1.5) -> np.ndarray:
+async def luminance_from_image(image_bytes: bytes, smoothing: float = 0.0) -> np.ndarray:
     return await asyncio.to_thread(luminance_from_image_sync, image_bytes, smoothing)
 
 

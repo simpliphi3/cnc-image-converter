@@ -204,9 +204,10 @@ async def _depth_for_image(
     if not img:
         raise HTTPException(404, "image not found")
     project_id = img["project_id"]
-    # v2: depth pipeline now dithers 8-bit sources to break contour terracing.
-    # The version tag invalidates pre-dither caches so the fix takes effect.
-    cache = files.project_dir(project_id) / f".depth_v2_{mode}_{image_id}.npy"
+    # v3: luminance extraction no longer applies a hidden sigma=1.5 blur — all
+    # smoothing is now user-controlled via STL params. The version tag
+    # invalidates caches that embedded the old baked-in blur.
+    cache = files.project_dir(project_id) / f".depth_v3_{mode}_{image_id}.npy"
     if cache.exists():
         try:
             return np.load(cache), img

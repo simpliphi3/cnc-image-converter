@@ -105,27 +105,40 @@ export default function Convert() {
           setAutoSelectedLuminance(true);
           setSourceRole(img.role);
           setPairedImageId(img.paired_image_id ?? null);
-          // Start bas-relief sources in the EasyCreate-matching configuration:
-          // edge-preserving smoothing to clean the background field and a
-          // medium S-curve to restore faces-high / background-low hierarchy.
+          // Crisp-first philosophy: the tool should hand Aspire the sharpest
+          // mesh it can, and leave smoothing as a downstream (reversible)
+          // choice — Aspire has its own sculpting/smoothing tools.
           //
-          // Denoise tuning (measured, frequency-chart experiment): the source
-          // is downsampled to mesh resolution BEFORE these run, and that
-          // downsample already averages out most JPEG DCT blocking — sigma 0.8
-          // suppresses artifacts as well as 3.5 did, while retaining ~130% of
-          // 8px fur/fabric detail vs ~53% under the old defaults. Mesh
-          // resolution 800px (the flat bottom is now a perimeter fan, so this
-          // still yields fewer triangles than 600px did before).
+          // ai_heightmap (the recommended chained carve source) therefore
+          // ships COMPLETELY unshaped: no blur, no bilateral, no unsharp, no
+          // curve remap, and mesh resolution high enough (1024) to pass the
+          // Gemini render's native detail through unclamped.
+          //
+          // ai_relief (advanced lit-render path) keeps light cleanup, since
+          // raw render luminance carries JPEG noise and tonal lighting that
+          // benefit from denoise + the S-curve hierarchy fix.
           const isHeightmap = img.role === "ai_heightmap";
-          setCurvePreset("medium");
-          setParams((prev) => ({
-            ...prev,
-            gaussian_blur_sigma: isHeightmap ? 0.8 : 1.0,
-            detail: isHeightmap ? 0.35 : 0.4,
-            bilateral_strength: isHeightmap ? 0.3 : 0.35,
-            curve_points: CURVE_PRESETS.medium,
-            target_max_dim_px: 800,
-          }));
+          if (isHeightmap) {
+            setCurvePreset("linear");
+            setParams((prev) => ({
+              ...prev,
+              gaussian_blur_sigma: 0,
+              detail: 0,
+              bilateral_strength: 0,
+              curve_points: null,
+              target_max_dim_px: 1024,
+            }));
+          } else {
+            setCurvePreset("medium");
+            setParams((prev) => ({
+              ...prev,
+              gaussian_blur_sigma: 1.0,
+              detail: 0.4,
+              bilateral_strength: 0.35,
+              curve_points: CURVE_PRESETS.medium,
+              target_max_dim_px: 800,
+            }));
+          }
         } else {
           setSourceRole(null);
           setPairedImageId(null);
@@ -414,7 +427,7 @@ export default function Convert() {
             </div>
           </div>
           {num("background_threshold", "Background flatten threshold", 0, 0.5, 0.01)}
-          {num("target_max_dim_px", "Mesh resolution (max dim, px)", 200, 1200, 50)}
+          {num("target_max_dim_px", "Mesh resolution (max dim, px)", 200, 1600, 50)}
 
           <div className="row">
             <label
